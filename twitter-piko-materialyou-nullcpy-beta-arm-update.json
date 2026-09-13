@@ -1,6 +1,6 @@
 {
-  "version": "v12.19.1-release.0 (patches dev.6.mpp)",
-  "versionCode": 260024,
+  "version": "v12.19.1-release.0 (patches dev.7.mpp)",
+  "versionCode": 260046,
   "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/twitter-piko-material-you-module-v12.19.1-release.0-arm-v7a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260024.md"
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260046.md"
 }
