@@ -1,6 +1,6 @@
 {
-  "version": "v12.19.1-release.0 (patches dev.7.mpp)",
-  "versionCode": 260046,
+  "version": "v12.19.1-release.0 (patches dev.8.mpp)",
+  "versionCode": 260048,
   "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/twitter-piko-module-v12.19.1-release.0-arm64-v8a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260046.md"
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260048.md"
 }
