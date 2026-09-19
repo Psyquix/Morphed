@@ -1,6 +1,6 @@
 {
-  "version": "v2026.37.0 (patches dev.5.mpp)",
-  "versionCode": 260073,
-  "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/reddit-morphe-experimental-module-v2026.37.0-arm-v7a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260073.md"
+  "version": "v2026.38.0 (patches dev.9.mpp)",
+  "versionCode": 260084,
+  "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/reddit-morphe-experimental-module-v2026.38.0-arm-v7a.zip",
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260084.md"
 }

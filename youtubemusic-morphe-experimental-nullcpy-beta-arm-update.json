@@ -1,6 +1,6 @@
 {
-  "version": "v9.36.50 (patches dev.7.mpp)",
-  "versionCode": 260082,
+  "version": "v9.36.50 (patches dev.9.mpp)",
+  "versionCode": 260084,
   "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/youtube-music-morphe-experimental-module-v9.36.50-arm-v7a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260082.md"
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260084.md"
 }
