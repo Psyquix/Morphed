@@ -1,6 +1,6 @@
 {
-  "version": "v7.92.0.977185651 (patches 1.4.2.mpp)",
-  "versionCode": 260058,
+  "version": "v7.92.0.977185651 (patches 1.4.3.mpp)",
+  "versionCode": 260088,
   "zipUrl": "https://github.com/nullcpy/rvb/releases/download/stable/google-photos-devanced-module-v7.92.0.977185651-arm-v7a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260058.md"
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260088.md"
 }
