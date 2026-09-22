@@ -1,6 +1,6 @@
 patches-source = "MorpheApp/morphe-patches"
 patches-version = "both"
-build-mode = "both"
+build-mode = "apk"
 brand = "Morphe"
 
 [YouTube-Morphe]
@@ -24,34 +24,6 @@ uptodown-dlurl = "https://youtube-music.en.uptodown.com/android"
 apkpure-dlurl = "https://apkpure.com/youtube-music/com.google.android.apps.youtube.music"
 apkcombo-dlurl = "https://apkcombo.com/youtube-music/com.google.android.apps.youtube.music"
 archive-dlurl = "https://archive.org/download/geologically/apks/com.google.android.apps.youtube.music"
-
-[YouTube-Morphe-NordTheme]
-enabled = true
-pkg-name = "com.google.android.youtube"
-app-name = "YouTube"
-variant = "Nord Theme"
-patch-folder = "youtube"
-patches-version = "stable"
-patcher-args = "-e 'Theme' -OdarkThemeBackgroundColor=#2E3440 -OlightThemeBackgroundColor=#E5E9F0"
-apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube"
-uptodown-dlurl = "https://youtube.en.uptodown.com/android"
-apkpure-dlurl = "https://apkpure.com/youtube-app/com.google.android.youtube"
-apkcombo-dlurl = "https://apkcombo.com/youtube/com.google.android.youtube"
-archive-dlurl = "https://archive.org/download/geologically/apks/com.google.android.youtube"
-
-[YouTube-Morphe-MochaTheme]
-enabled = true
-pkg-name = "com.google.android.youtube"
-app-name = "YouTube"
-variant = "Mocha Theme"
-patch-folder = "youtube"
-patches-version = "stable"
-patcher-args = "-e 'Theme' -OdarkThemeBackgroundColor=#FF181825 -OlightThemeBackgroundColor=#E6E9EF"
-apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube"
-uptodown-dlurl = "https://youtube.en.uptodown.com/android"
-apkpure-dlurl = "https://apkpure.com/youtube-app/com.google.android.youtube"
-apkcombo-dlurl = "https://apkcombo.com/youtube/com.google.android.youtube"
-archive-dlurl = "https://archive.org/download/geologically/apks/com.google.android.youtube"
 
 [YouTube-Morphe-Experimental]
 enabled = true
