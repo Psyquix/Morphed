@@ -49,6 +49,20 @@ Thank you to everyone who helps keep this project alive!
 
 ---
 
+## 📱 Patched Apps
+
+| App | Patch source | Beta patches | Experimental build |
+|---|---|---|---|
+| YouTube | [MorpheApp/morphe-patches](https://github.com/MorpheApp/morphe-patches) | ✅ | ✅ |
+| YouTube Music | [MorpheApp/morphe-patches](https://github.com/MorpheApp/morphe-patches) | ✅ | ✅ |
+| Reddit | [MorpheApp/morphe-patches](https://github.com/MorpheApp/morphe-patches) | ✅ | ✅ |
+| TikTok | [SysAdminDoc/hushfeed](https://github.com/SysAdminDoc/hushfeed) | ✅ | ✅ |
+| X (Twitter) | [crimera/piko](https://github.com/crimera/piko) | ✅ | ✅ |
+
+All builds are APK only, using stable and beta patches with stable plus experimental app versions.
+
+---
+
 ## 💖 Credits & Acknowledgements
 
 This automated builder would not be possible without the incredible work and dedication of the open-source Android community. A massive thank you to:

@@ -28,6 +28,7 @@ jobs:
           BRANCH="${{ matrix.branch }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          PROTECTED=(.github/configs/patches .github/configs/config.manual.toml README.md .github/scripts/generate_release_notes.py)
           if git remote get-url upstream >/dev/null 2>&1; then
             git remote set-url upstream "https://github.com/nullcpy/rvb.git"
           else
@@ -41,14 +42,14 @@ jobs:
           git merge --no-commit --no-ff "upstream/$BRANCH" || true
           # --- Protected paths: always keep OUR version ---
           # 1. Restore files we still track to our pre-merge state:
-          git checkout HEAD -- .github/configs/patches .github/configs/config.manual.toml || true
+          git checkout HEAD -- "${PROTECTED[@]}" || true
           # 2. Drop files upstream added under protected paths
           #    (skip unmerged ones and paths already absent;
           #    -f is needed because merge-staged additions resist plain rm):
           UNMERGED="$(git diff --name-only --diff-filter=U || true)"
           comm -13 \
-            <(git ls-tree -r --name-only HEAD -- .github/configs/patches .github/configs/config.manual.toml | sort) \
-            <(git ls-tree -r --name-only MERGE_HEAD -- .github/configs/patches .github/configs/config.manual.toml | sort) \
+            <(git ls-tree -r --name-only HEAD -- "${PROTECTED[@]}" | sort) \
+            <(git ls-tree -r --name-only MERGE_HEAD -- "${PROTECTED[@]}" | sort) \
             | while IFS= read -r f; do
                 [ -n "$f" ] || continue
                 if printf '%s\n' "$UNMERGED" | grep -qxF "$f"; then continue; fi
@@ -60,7 +61,7 @@ jobs:
           #    (tracked file -> keep ours, file we deleted -> stay deleted):
           for f in $(git diff --name-only --diff-filter=U || true); do
             case "$f" in
-              .github/configs/patches/*|.github/configs/config.manual.toml)
+              .github/configs/patches/*|.github/configs/config.manual.toml|README.md|.github/scripts/generate_release_notes.py)
                 if git cat-file -e "HEAD:$f" 2>/dev/null; then
                   git checkout --ours -- "$f"
                 else

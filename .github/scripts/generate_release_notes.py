@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
+"""Generate release notes: patch groups first, then per-source patch release notes.
+
+Output format:
+    ### 🧩 <source> (<tag>)
+
+        <App> v<version>
+        ...
+
+    ---
+    ### ℹ️ <brand>-release-notes:
+    <patch release body>
+    ---
+    ...
+"""
+import json
 import os
 import re
-import json
-import glob
+import urllib.request
 from pathlib import Path
+
 
 def load_json(path, default=None):
     if os.path.exists(path):
@@ -13,6 +28,7 @@ def load_json(path, default=None):
         except Exception as e:
             print(f"Warning: Could not read {path}: {e}")
     return default if default is not None else {}
+
 
 def resolve_display_name(target_key, info):
     base_name = info.get("display_name") or target_key
@@ -27,61 +43,44 @@ def resolve_display_name(target_key, info):
         return f"{base_name} ({' - '.join(extras)})"
     return base_name
 
-def normalize_arch(arch_raw):
-    a = (arch_raw or "").lower().strip()
-    if "arm64" in a or "aarch64" in a:
-        return "arm64"
-    if "arm" in a or "armeabi" in a:
-        return "arm"
-    if a in ["all", "universal"] or a.endswith("-all") or a.endswith("-universal"):
-        return "all"
-    if "x86_64" in a or "x64" in a:
-        return "x86_64"
-    if "x86" in a:
-        return "x86"
-    return a or "all"
 
-def extract_arch(fname, version=""):
-    # First match against known architecture tokens at the end of the filename
-    match = re.search(
-        r"-(arm64-v8a|armeabi-v7a|arm-v7a|aarch64|arm64|arm32|arm|x86_64|x64|x86|universal|all)(?:-(?:apk|module))?\.(?:apk|zip)$",
-        fname,
-        re.IGNORECASE
-    )
-    if match:
-        return match.group(1)
+def brand_slug(info, source):
+    brand = (info.get("brand") or "").strip()
+    if brand:
+        return re.sub(r"\s+", "-", brand.lower())
+    repo = (source.split("/")[-1] if "/" in source else source).lower()
+    repo = re.sub(r"[-_]patches$", "", repo)
+    return repo or "patches"
 
-    # If version is provided, match what follows -v<version>-
-    if version:
-        clean_ver = re.escape(version.lstrip("v"))
-        m = re.search(rf"-v?{clean_ver}-([a-zA-Z0-9_-]+?)(?:-(?:apk|module))?\.(?:apk|zip)$", fname, re.IGNORECASE)
-        if m:
-            return m.group(1)
 
-    # Fallback to the last hyphen-delimited segment before extension
-    name_no_ext = re.sub(r"\.(?:apk|zip)$", "", fname, flags=re.IGNORECASE)
-    name_no_mode = re.sub(r"-(?:apk|module)$", "", name_no_ext, flags=re.IGNORECASE)
-    parts = name_no_mode.split("-")
-    if len(parts) > 1:
-        return parts[-1]
+def fetch_release_body(source, tag):
+    """Fetch a patch source's GitHub release notes body. Returns None on failure."""
+    if not source or not tag or "/" not in source:
+        return None
+    url = f"https://api.github.com/repos/{source}/releases/tags/{tag}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "rvb-release-notes",
+    }
+    token = os.environ.get("GH_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.load(resp)
+        body = (data.get("body") or "").strip()
+        return body if body else None
+    except Exception as e:
+        print(f"Warning: could not fetch release notes for {source} {tag}: {e}")
+        return None
 
-    return "all"
 
 def main():
-    next_ver_code = os.environ.get("NEXT_VER_CODE", "").strip()
-    github_server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
-    github_repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
-
-    build_dir = Path("build")
     build_json_file = Path("build.json")
+    build_dir = Path("build")
 
-    build_info = {}
-    if build_json_file.exists():
-        try:
-            with open(build_json_file, "r", encoding="utf-8") as f:
-                build_info = json.load(f)
-        except Exception as e:
-            print(f"Warning: Could not read {build_json_file}: {e}")
+    build_info = load_json(build_json_file, {})
 
     # Discover actual files in build/
     built_files = []
@@ -89,17 +88,19 @@ def main():
         built_files = [f.name for f in build_dir.iterdir() if f.is_file() and f.suffix.lower() in [".apk", ".zip"]]
 
     # Map target keys to patch groups
-    # Group: patch_source -> { "tag": str, "changelog_url": str, "apps": { app_name: { "version": str, "apks": [], "modules": [] } } }
+    # Group: patch_source -> { "source", "tag", "slug", "apps": { app_name: version } }
     patch_groups = {}
 
     for target_key, info in build_info.items():
+        if not isinstance(info, dict):
+            continue
         patches_source = info.get("patches_source") or ""
         patches_ref = info.get("patches") or ""
         changelog_url = (info.get("changelog") or "").strip()
 
         # Extract primary patch source and version tag
         primary_source = patches_source.split()[0] if patches_source else (patches_ref.split()[0].split("/")[0] if "/" in patches_ref else "Patched")
-        
+
         # Determine patch version tag
         patch_tag = ""
         if changelog_url:
@@ -118,121 +119,69 @@ def main():
                 matched = tag_match.group(0)
                 patch_tag = matched if matched.startswith("v") else f"v{matched}"
 
-        group_key = primary_source
-        if group_key not in patch_groups:
-            patch_groups[group_key] = {
+        if primary_source not in patch_groups:
+            patch_groups[primary_source] = {
                 "source": primary_source,
                 "tag": patch_tag,
-                "changelog_url": changelog_url.split()[0] if changelog_url else "",
+                "slug": brand_slug(info, primary_source),
                 "apps": {}
             }
 
-        # Resolve display name directly from structured build info
+        # Only list apps that actually produced a file in build/
         display_name = resolve_display_name(target_key, info)
         version = info.get("version", "")
         file_prefix = info.get("name", "")
+        prefix_lower = file_prefix.lower()
+        built = any(
+            fname.lower().startswith(prefix_lower + "-v") or fname.lower().startswith(prefix_lower + "-module-")
+            for fname in built_files
+        ) if prefix_lower else bool(built_files)
+        if built:
+            patch_groups[primary_source]["apps"][display_name] = version
 
-        app_entry = {
-            "display_name": display_name,
-            "version": version,
-            "apks": [],
-            "modules": []
-        }
-
-        # Find matching built files
-        # apk format: <file_prefix>-v<version>-<arch>.apk
-        # module format: <file_prefix>-module-v<version>-<arch>.zip
-        for fname in built_files:
-            lower = fname.lower()
-            prefix_lower = file_prefix.lower()
-            if not (lower.startswith(prefix_lower + "-v") or lower.startswith(prefix_lower + "-module-")):
-                continue
-
-            # Check if apk
-            if lower.endswith(".apk") and not "-module-" in lower:
-                raw_arch = extract_arch(fname, version)
-                norm_arch = normalize_arch(raw_arch)
-                dl_url = f"{github_server}/{github_repo}/releases/download/{next_ver_code}/{fname}" if (github_repo and next_ver_code) else f"./build/{fname}"
-                app_entry["apks"].append((norm_arch, dl_url))
-
-            # Check if module zip
-            elif lower.endswith(".zip") and "-module-" in lower:
-                raw_arch = extract_arch(fname, version)
-                norm_arch = normalize_arch(raw_arch)
-                dl_url = f"{github_server}/{github_repo}/releases/download/{next_ver_code}/{fname}" if (github_repo and next_ver_code) else f"./build/{fname}"
-                app_entry["modules"].append((norm_arch, dl_url))
-
-        # Sort architectures consistently: arm64, arm, all, etc.
-        arch_priority = {"arm64": 0, "arm": 1, "all": 2, "universal": 3, "x86_64": 4, "x86": 5}
-        app_entry["apks"].sort(key=lambda x: arch_priority.get(x[0], 99))
-        app_entry["modules"].sort(key=lambda x: arch_priority.get(x[0], 99))
-
-        if app_entry["apks"] or app_entry["modules"]:
-            patch_groups[group_key]["apps"][display_name] = app_entry
-
-    # Build output markdown
     lines = []
-
-    # Sort groups alphabetically
     sorted_group_keys = sorted(patch_groups.keys())
 
+    # Patches block first
     for gkey in sorted_group_keys:
         group = patch_groups[gkey]
         apps = group["apps"]
         if not apps:
             continue
-
-        # Header format: ### 🧩 source ([tag](url))
-        src = group["source"]
-        tag = group["tag"]
-        cl_url = group["changelog_url"]
-
-        if tag and cl_url:
-            tag_str = f" ([{tag}]({cl_url}))"
-        elif tag:
-            tag_str = f" ({tag})"
-        elif cl_url:
-            tag_str = f" ([changelog]({cl_url}))"
-        else:
-            tag_str = ""
-
-        lines.append(f"### 🧩 {src}{tag_str}")
+        tag_str = f" ({group['tag']})" if group["tag"] else ""
+        lines.append(f"### 🧩 {group['source']}{tag_str}")
+        lines.append("")
+        for app_name in sorted(apps.keys()):
+            ver = apps[app_name]
+            ver_str = f" v{ver}" if ver else ""
+            lines.append(f"    {app_name}{ver_str}")
         lines.append("")
 
-        # List apps in this patch group
-        for app_name in sorted(apps.keys()):
-            app = apps[app_name]
-            ver_str = f" `v{app['version']}`" if app['version'] else ""
-            lines.append(f"* **{app['display_name']}**{ver_str}")
-
-            if app["apks"]:
-                apk_links = " • ".join([f"[{arch}]({url})" for arch, url in app["apks"]])
-                lines.append(f"  * APK: {apk_links}")
-
-            if app["modules"]:
-                mod_links = " • ".join([f"[{arch}]({url})" for arch, url in app["modules"]])
-                lines.append(f"  * Module: {mod_links}")
-
+    # Release notes blocks underneath, separated
+    notes_groups = [patch_groups[k] for k in sorted_group_keys if patch_groups[k]["apps"]]
+    if notes_groups:
+        lines.append("---")
+        lines.append("")
+        for i, group in enumerate(notes_groups):
+            if i > 0:
+                lines.append("---")
+                lines.append("")
+            lines.append(f"### ℹ️ {group['slug']}-release-notes:")
+            lines.append("")
+            body = fetch_release_body(group["source"], group["tag"])
+            if body:
+                lines.append(body)
+            else:
+                tag_hint = f" {group['tag']}" if group["tag"] else ""
+                lines.append(f"_Release notes unavailable for {group['source']}{tag_hint}_")
             lines.append("")
 
-    # Notes section
-    lines.append("---")
-    lines.append("")
-    lines.append("### ℹ️ Notes")
-    lines.append("• Install [MicroG-RE](https://github.com/MorpheApp/MicroG-RE/releases/latest) or [MicroG](https://github.com/ReVanced/GmsCore/releases/latest), required for Google APKs.  ")
-    lines.append("• Use [Zygisk Detach](https://github.com/j-hc/zygisk-detach) to stop Play Store from updating Modules.  ")
-    lines.append("")
-    gh_repo = os.environ.get("GITHUB_REPOSITORY") or "nullcpy/rvb"
-    tg_link = os.environ.get("RELEASE_NOTES_TG_LINK") or "https://t.me/rvb27"
-    donate_link = os.environ.get("RELEASE_NOTES_DONATE_LINK") or "https://fahim-ahmed05.github.io/donate"
-    website_link = os.environ.get("RELEASE_NOTES_WEBSITE_LINK") or "https://nullcpy.github.io"
-    lines.append(f"🌐 [GitHub](https://github.com/{gh_repo}) | 💬 [Group]({tg_link}) | ☕ [Donate]({donate_link}) | 🔗 [Website]({website_link})")
-    lines.append("")
     content = "\n".join(lines)
     with open("build.md", "w", encoding="utf-8") as f:
         f.write(content)
 
     print("Successfully generated build.md")
+
 
 if __name__ == "__main__":
     main()
