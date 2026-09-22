@@ -14,11 +14,72 @@ jobs:
       matrix:
         branch: [main, update]
     steps:
-      - name: Merge upstream into ${{ matrix.branch }}
+      - name: Checkout ${{ matrix.branch }}
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 0
+
+      - name: Merge upstream, keeping our patch configs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api "repos/${{ github.repository }}/merge-upstream" \
-            --method POST \
-            -f branch="${{ matrix.branch }}" \
-            --jq '{message, merge_type, base_branch}' || echo "Already in sync or nothing to merge for ${{ matrix.branch }}"
+          set -euo pipefail
+          BRANCH="${{ matrix.branch }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream "https://github.com/nullcpy/rvb.git"
+          else
+            git remote add upstream "https://github.com/nullcpy/rvb.git"
+          fi
+          git fetch upstream "$BRANCH"
+          if git merge-base --is-ancestor "upstream/$BRANCH" HEAD; then
+            echo "Already in sync with upstream/$BRANCH."
+            exit 0
+          fi
+          git merge --no-commit --no-ff "upstream/$BRANCH" || true
+          # --- Protected paths: always keep OUR version ---
+          # 1. Restore files we still track to our pre-merge state:
+          git checkout HEAD -- .github/configs/patches .github/configs/config.manual.toml || true
+          # 2. Drop files upstream added under protected paths
+          #    (skip unmerged ones and paths already absent;
+          #    -f is needed because merge-staged additions resist plain rm):
+          UNMERGED="$(git diff --name-only --diff-filter=U || true)"
+          comm -13 \
+            <(git ls-tree -r --name-only HEAD -- .github/configs/patches .github/configs/config.manual.toml | sort) \
+            <(git ls-tree -r --name-only MERGE_HEAD -- .github/configs/patches .github/configs/config.manual.toml | sort) \
+            | while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                if printf '%s\n' "$UNMERGED" | grep -qxF "$f"; then continue; fi
+                if [ -e "$f" ] || git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+                  git rm -q -f -- "$f"
+                fi
+              done || true
+          # 3. Resolve remaining conflicts on protected paths with OUR side
+          #    (tracked file -> keep ours, file we deleted -> stay deleted):
+          for f in $(git diff --name-only --diff-filter=U || true); do
+            case "$f" in
+              .github/configs/patches/*|.github/configs/config.manual.toml)
+                if git cat-file -e "HEAD:$f" 2>/dev/null; then
+                  git checkout --ours -- "$f"
+                else
+                  git rm -q -- "$f"
+                fi
+                ;;
+            esac
+          done
+          # Conflicts anywhere else need a human:
+          if [ -n "$(git diff --name-only --diff-filter=U || true)" ]; then
+            echo "Unresolved conflicts outside protected paths:"
+            git diff --name-only --diff-filter=U || true
+            exit 1
+          fi
+          git add -A
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Nothing to merge after keeping our configs."
+            git merge --abort
+            exit 0
+          fi
+          git commit -m "Sync upstream/$BRANCH (keeping local patch configs)"
+          git push origin "HEAD:$BRANCH"
