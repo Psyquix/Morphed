@@ -1,6 +1,6 @@
 # Update branch — module updater endpoints (generated, do not edit)
 
-This branch serves the in-place updater for the KernelSU/LSPatch modules built
+This branch serves the in-place updater for the KernelSU/Magisk modules built
 by [nullcpy/rvb](https://github.com/nullcpy/rvb). Module zips are baked at
 build time with exactly:
 
@@ -29,5 +29,5 @@ silently 404.
   fossilized pointers (zipUrl asset gone from the archive AND origin build
   release deleted).
 
-Fresh APK/module files always come from the `stable`/`beta` release downloads;
+Fresh Module files always come from the `stable`/`beta` release downloads;
 build metadata history lives on the `website` branch.
