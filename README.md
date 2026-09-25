@@ -1,6 +1,6 @@
 # update branch — module updater wire format
 
-This branch is polled directly by KernelSU/LSPatch module updaters. Every
+This branch is polled directly by the KernelSU / Magisk app module updaters (LSPatch does not consume these). Every
 module zip bakes its update URL into `module.prop` (`updateJson`) at build
 time, derived from `update_json_path()` in `scripts/utils.sh`:
 
