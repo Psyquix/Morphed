@@ -25,9 +25,10 @@ silently 404.
 
 - `build_update_changelog.sh` (build.yml) adds/rewrites entries per build and
   pushes via git-auto-commit.
-- `cleanup_update_branch.sh` (cleanup.yml) prunes orphaned changelogs and
-  dead pointers (zipUrl asset no longer on the archive release it, or numbered
-  release deleted).
+- `cleanup_update_branch.sh` (cleanup.yml) prunes orphaned changelogs and dead
+  pointers — a zipUrl whose asset is no longer on `stable`/`beta`, or (for
+  numbered pointers) whose release was deleted. A still-built slug rewrites
+  its own pointer next build, so pruning a dead one is lossless.
 
 Fresh Module files always come from the `stable`/`beta` release downloads;
 build metadata history lives on the `website` branch.
