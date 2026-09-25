@@ -1,34 +1,24 @@
-# Update branch — module updater endpoints (generated, do not edit)
+# update branch — module updater wire format
 
-This branch serves the in-place updater for the KernelSU/Magisk modules built
-by [nullcpy/rvb](https://github.com/nullcpy/rvb). Module zips are baked at
-build time with exactly:
+This branch is polled directly by KernelSU/LSPatch module updaters. Every
+module zip bakes its update URL into `module.prop` (`updateJson`) at build
+time, derived from `update_json_path()` in `scripts/utils.sh`:
 
-    https://raw.githubusercontent.com/nullcpy/rvb/update/<module>-update.json
+    https://raw.githubusercontent.com/<repo>/update/<channel>/<id>-update.json
 
-so **this is a wire format**: files may be deleted by maintenance, but never
-moved, renamed, or reorganized — every already-installed module would
-silently 404.
+- `<channel>` is `stable` or `beta` — the folder *is* the channel (no more
+  `-beta-` filename infix).
+- File names carry no author segment.
+- The 2026-09-25 restructure into folders is a hard cutover: modules built
+  before it point at old flat root paths and must be reflashed manually.
 
-## Layout
+Rules:
+- Paths are a public wire format: never move, rename, or "tidy" these files;
+  only create (builds) and delete (cleanup) them.
+- Written by `build_update_changelog.sh` (build.yml), pruned by
+  `cleanup_update_branch.sh` (cleanup.yml): a pointer dies when its zipUrl
+  asset is no longer on the `stable`/`beta` archive release; orphaned
+  changelogs die when no surviving pointer cites them.
 
-- `<root>/*-update.json` — one per built app/brand/arch/channel variant,
-  e.g. `youtube-morphe-nullcpy-arm64-update.json`, beta channel marked by a
-  `-beta-` infix in the filename. KernelSU/LSPatch `update.json` schema:
-  `version`, `versionCode` (build number), `zipUrl` (points at the rolling
-  `stable`/`beta` archive release asset), `changelog` (points at
-  `changelogs/<build>.md` right here).
-- `changelogs/<build>.md` — per-build release notes, kept while any live
-  `*-update.json` references them or their release still exists.
-
-## Who writes it
-
-- `build_update_changelog.sh` (build.yml) adds/rewrites entries per build and
-  pushes via git-auto-commit.
-- `cleanup_update_branch.sh` (cleanup.yml) prunes orphaned changelogs and dead
-  pointers — a zipUrl whose asset is no longer on `stable`/`beta`, or (for
-  numbered pointers) whose release was deleted. A still-built slug rewrites
-  its own pointer next build, so pruning a dead one is lossless.
-
-Fresh Module files always come from the `stable`/`beta` release downloads;
+Fresh module/APK files come from the `stable`/`beta` release downloads;
 build metadata history lives on the `website` branch.
