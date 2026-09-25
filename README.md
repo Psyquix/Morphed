@@ -26,7 +26,7 @@ silently 404.
 - `build_update_changelog.sh` (build.yml) adds/rewrites entries per build and
   pushes via git-auto-commit.
 - `cleanup_update_branch.sh` (cleanup.yml) prunes orphaned changelogs and
-  fossilized pointers (zipUrl asset gone from the archive AND origin build
+  dead pointers (zipUrl asset no longer on the archive release it, or numbered
   release deleted).
 
 Fresh Module files always come from the `stable`/`beta` release downloads;
