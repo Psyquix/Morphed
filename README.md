@@ -4,11 +4,11 @@ This branch is polled directly by KernelSU/LSPatch module updaters. Every
 module zip bakes its update URL into `module.prop` (`updateJson`) at build
 time, derived from `update_json_path()` in `scripts/utils.sh`:
 
-    https://raw.githubusercontent.com/<repo>/update/<channel>/<id>-update.json
+    https://raw.githubusercontent.com/<repo>/update/<channel>/<id>.json
 
 - `<channel>` is `stable` or `beta` — the folder *is* the channel (no more
   `-beta-` filename infix).
-- File names carry no author segment.
+- File names are the bare module id: no author segment, no `-update` suffix.
 - The 2026-09-25 restructure into folders is a hard cutover: modules built
   before it point at old flat root paths and must be reflashed manually.
 
