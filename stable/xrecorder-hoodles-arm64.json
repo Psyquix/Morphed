@@ -1,6 +1,6 @@
 {
-  "version": "v2.5.1.1 (patches 1.45.0.mpp)",
-  "versionCode": 260141,
+  "version": "v2.5.1.1 (patches 1.46.0.mpp)",
+  "versionCode": 260150,
   "zipUrl": "https://github.com/nullcpy/rvb/releases/download/stable/xrecorder-hoodles-module-v2.5.1.1-arm64-v8a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260141.md"
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260150.md"
 }
