@@ -5,8 +5,8 @@
     "blocked": false,
     "host": "github",
     "repo": "MorpheApp/morphe-patches",
-    "stable": "v1.44.0",
-    "stable_date": "2026-09-21T15:11:56Z"
+    "stable": "v1.45.0",
+    "stable_date": "2026-10-02T08:55:35Z"
   },
   "SysAdminDoc/hushfeed": {
     "beta": "",
