@@ -1,6 +1,6 @@
 {
-  "version": "v2026.39.0 (patches dev.1.mpp)",
-  "versionCode": 260168,
-  "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/reddit-morphe-experimental-module-v2026.39.0-arm64-v8a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260168.md"
+  "version": "v2026.40.0 (patches dev.2.mpp)",
+  "versionCode": 260176,
+  "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/reddit-morphe-experimental-module-v2026.40.0-arm64-v8a.zip",
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260176.md"
 }
