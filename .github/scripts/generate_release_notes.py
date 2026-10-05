@@ -53,6 +53,24 @@ def brand_slug(info, source):
     return repo or "patches"
 
 
+def tag_from_changelog_url(url):
+    """Extract a release tag from a changelog URL. Returns "" when unknown."""
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if "/tag/" in url:
+        return url.split("/tag/")[-1].strip("/")
+    if "/-/releases/" in url:
+        return url.split("/-/releases/")[-1].strip("/")
+    if "/releases/" in url:
+        return url.split("/releases/")[-1].strip("/")
+    return ""
+
+
+def clean_token(tok):
+    return (tok or "").strip().strip("'\"")
+
+
 def fetch_release_body(source, tag):
     """Fetch a patch source's GitHub release notes body. Returns None on failure."""
     if not source or not tag or "/" not in source:
@@ -90,6 +108,9 @@ def main():
     # Map target keys to patch groups
     # Group: patch_source -> { "source", "tag", "slug", "apps": { app_name: version } }
     patch_groups = {}
+    # Secondary patch sources (2nd+ bundle on multi-source apps) keep their own
+    # notes blocks below: {(source, tag): {"source", "tag", "apps": [app_name]}}.
+    secondary_sources = {}
 
     for target_key, info in build_info.items():
         if not isinstance(info, dict):
@@ -119,6 +140,27 @@ def main():
                 matched = tag_match.group(0)
                 patch_tag = matched if matched.startswith("v") else f"v{matched}"
 
+        # Secondary sources for this app, resolved positionally against the
+        # space-aligned changelog and patches-ref lists. Primary grouping
+        # above is intentionally untouched.
+        app_secondaries = []
+        if patches_source:
+            src_tokens = [clean_token(s) for s in patches_source.split()]
+            url_tokens = changelog_url.split() if changelog_url else []
+            ref_tokens = patches_ref.split() if patches_ref else []
+            for pos in range(1, len(src_tokens)):
+                sec = src_tokens[pos]
+                if not sec or "/" not in sec:
+                    continue
+                sec_tag = tag_from_changelog_url(url_tokens[pos] if pos < len(url_tokens) else "")
+                if not sec_tag and pos < len(ref_tokens):
+                    ref_part = re.sub(r"\.(mpp|jar|rvp|apk|zip)$", "", ref_tokens[pos], flags=re.IGNORECASE)
+                    tag_match = re.search(r"v?\d+(\.\d+)+([.-][a-zA-Z0-9]+)*", ref_part)
+                    if tag_match:
+                        matched = tag_match.group(0)
+                        sec_tag = matched if matched.startswith("v") else f"v{matched}"
+                app_secondaries.append((sec, sec_tag))
+
         if primary_source not in patch_groups:
             patch_groups[primary_source] = {
                 "source": primary_source,
@@ -138,6 +180,12 @@ def main():
         ) if prefix_lower else bool(built_files)
         if built:
             patch_groups[primary_source]["apps"][display_name] = version
+            for sec, sec_tag in app_secondaries:
+                key = (sec, sec_tag)
+                if key not in secondary_sources:
+                    secondary_sources[key] = {"source": sec, "tag": sec_tag, "apps": []}
+                if display_name not in secondary_sources[key]["apps"]:
+                    secondary_sources[key]["apps"].append(display_name)
 
     lines = []
     sorted_group_keys = sorted(patch_groups.keys())
@@ -167,6 +215,32 @@ def main():
                 lines.append("---")
                 lines.append("")
             lines.append(f"### ℹ️ {group['slug']}-release-notes:")
+            lines.append("")
+            body = fetch_release_body(group["source"], group["tag"])
+            if body:
+                lines.append(body)
+            else:
+                tag_hint = f" {group['tag']}" if group["tag"] else ""
+                lines.append(f"_Release notes unavailable for {group['source']}{tag_hint}_")
+            lines.append("")
+
+    # Secondary-source notes: one block per extra bundle that shipped in a
+    # built app (e.g. a second patches-source). Skipped when that source is
+    # already covered as a primary group. Full `Owner/Repo` in the header
+    # keeps it distinct from same-brand primary sections.
+    primary_keys = {clean_token(k) for k in sorted_group_keys if patch_groups[k]["apps"]}
+    extra_groups = sorted(
+        (sec for sec in secondary_sources.values() if sec["apps"] and sec["source"] not in primary_keys),
+        key=lambda s: (s["source"], s["tag"]),
+    )
+    if extra_groups:
+        if not notes_groups:
+            lines.append("---")
+            lines.append("")
+        for group in extra_groups:
+            lines.append("---")
+            lines.append("")
+            lines.append(f"### ℹ️ {group['source']}-release-notes:")
             lines.append("")
             body = fetch_release_body(group["source"], group["tag"])
             if body:
