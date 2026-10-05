@@ -53,6 +53,18 @@ def brand_slug(info, source):
     return repo or "patches"
 
 
+def source_from_changelog_url(url):
+    """Extract `Owner/Repo` from a changelog release URL. Returns "" when unknown."""
+    url = (url or "").strip()
+    m = re.search(r"github\.com/([^/]+/[^/]+)/releases/", url)
+    if m:
+        return m.group(1)
+    m = re.search(r"gitlab\.com/([^/]+/[^/]+)/-/releases/", url)
+    if m:
+        return m.group(1)
+    return ""
+
+
 def tag_from_changelog_url(url):
     """Extract a release tag from a changelog URL. Returns "" when unknown."""
     url = (url or "").strip()
@@ -140,20 +152,24 @@ def main():
                 matched = tag_match.group(0)
                 patch_tag = matched if matched.startswith("v") else f"v{matched}"
 
-        # Secondary sources for this app, resolved positionally against the
-        # space-aligned changelog and patches-ref lists. Primary grouping
-        # above is intentionally untouched.
+        # Secondary sources for this app, resolved positionally from the
+        # space-aligned patches-ref and changelog lists (build.json keeps
+        # only the FIRST source in `patches_source`, so the full list must
+        # come from here). Primary grouping above is intentionally untouched.
         app_secondaries = []
-        if patches_source:
-            src_tokens = [clean_token(s) for s in patches_source.split()]
+        if patches_ref:
+            ref_tokens = patches_ref.split()
             url_tokens = changelog_url.split() if changelog_url else []
-            ref_tokens = patches_ref.split() if patches_ref else []
-            for pos in range(1, len(src_tokens)):
-                sec = src_tokens[pos]
-                if not sec or "/" not in sec:
+            for pos in range(1, len(ref_tokens)):
+                sec = ""
+                if pos < len(url_tokens):
+                    sec = source_from_changelog_url(url_tokens[pos])
+                if not sec:
+                    # Fall back to the ref owner when the URL is unusable.
+                    # The repo name is unknown then, so skip rather than guess.
                     continue
                 sec_tag = tag_from_changelog_url(url_tokens[pos] if pos < len(url_tokens) else "")
-                if not sec_tag and pos < len(ref_tokens):
+                if not sec_tag:
                     ref_part = re.sub(r"\.(mpp|jar|rvp|apk|zip)$", "", ref_tokens[pos], flags=re.IGNORECASE)
                     tag_match = re.search(r"v?\d+(\.\d+)+([.-][a-zA-Z0-9]+)*", ref_part)
                     if tag_match:
