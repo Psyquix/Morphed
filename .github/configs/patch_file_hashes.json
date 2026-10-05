@@ -282,10 +282,9 @@
   },
   "morpheapp/morphe-patches": {
     "beta": {
-      "com.google.android.apps.youtube.music": "7437f248f35820164e1bd4e6c7109039",
-      "com.google.android.youtube": "1282b62ef9b849baa7a3dfa5e71f7dab",
-      "com.reddit.frontpage": "b3a12bb81e4c553efafc3cd5d811f014",
-      "shared": "85bbf05e05d3f5ce8aed0d8076c5da82"
+      "com.google.android.apps.youtube.music": "6e15ac265748d60444843f410308f335",
+      "com.google.android.youtube": "ed480e488e5f144c7a8e9f330008f580",
+      "shared": "596b980f36b9f066038dcc445211d930"
     },
     "stable": {
       "com.google.android.apps.youtube.music": "d913b50d8f4a9ce0734ef1d1b3764a9f",
@@ -319,6 +318,10 @@
       "com.chess": "6e64f2075f9a0ffd28bd69321b738f30",
       "shared": "896486938b5de28e83d923a732d3ec47"
     }
+  },
+  "psyquix/morphe-patches": {
+    "beta": {},
+    "stable": {}
   },
   "quantavil/edge-morphe-patches": {
     "beta": {},
