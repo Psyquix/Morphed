@@ -1,12 +1,12 @@
 {
   "MorpheApp/morphe-patches": {
-    "beta": "v1.46.0-dev.8",
-    "beta_date": "2026-10-05T21:36:17Z",
+    "beta": "v1.46.0-dev.10",
+    "beta_date": "2026-10-06T10:49:00Z",
     "blocked": false,
     "host": "github",
     "repo": "MorpheApp/morphe-patches",
-    "stable": "v1.45.0",
-    "stable_date": "2026-10-02T08:55:35Z"
+    "stable": "v1.46.0",
+    "stable_date": "2026-10-06T11:42:42Z"
   },
   "Psyquix/Morphe-patches": {
     "beta": "",
