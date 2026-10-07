@@ -14,8 +14,8 @@
     "blocked": false,
     "host": "github",
     "repo": "Psyquix/Morphe-patches",
-    "stable": "2026.40.0-morphe-ver-13",
-    "stable_date": "2026-10-07T12:35:30Z"
+    "stable": "2026.40.0-morphe-ver-14",
+    "stable_date": "2026-10-07T12:56:02Z"
   },
   "SysAdminDoc/hushfeed": {
     "beta": "",
