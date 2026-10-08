@@ -282,9 +282,9 @@
   },
   "morpheapp/morphe-patches": {
     "beta": {
-      "com.google.android.apps.youtube.music": "24845e92ca9f10553fdd1fa8f41cb79b",
-      "com.google.android.youtube": "b5f3326f1b2aaf5efc40b7af73d37845",
-      "shared": "918d41db421b9405fe069971aa60d830"
+      "com.google.android.apps.youtube.music": "e5cac75ffab7096e7ecf31468e6df198",
+      "com.google.android.youtube": "4d2aec8100f20772157bacd88464c0ac",
+      "shared": "c1967db32611545111e0ab6962a8cda4"
     },
     "stable": {
       "com.google.android.apps.youtube.music": "3327ea672455ad2775caead711a576d1",
@@ -399,7 +399,7 @@
   "sysadmindoc/hushfeed": {
     "beta": {},
     "stable": {
-      "com.zhiliaoapp.musically": "fcf315d84de4624eaefbb0b0780c7434",
+      "com.zhiliaoapp.musically": "035ed61ea84965adf62970c0c9ea3750",
       "shared": "46d8882e3e2552c9319178d27875fbae"
     }
   }

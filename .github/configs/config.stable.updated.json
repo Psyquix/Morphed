@@ -121,7 +121,7 @@
   },
   "TikTok-hushfeed": {
     "build-mode": "apk",
-    "enabled": false,
+    "enabled": true,
     "pkg-name": "com.zhiliaoapp.musically",
     "app-name": "TikTok",
     "patches-source": "SysAdminDoc/hushfeed",
@@ -133,7 +133,7 @@
   },
   "TikTok-hushfeed-Experimental": {
     "build-mode": "apk",
-    "enabled": false,
+    "enabled": true,
     "pkg-name": "com.zhiliaoapp.musically",
     "app-name": "TikTok",
     "variant": "Experimental",
