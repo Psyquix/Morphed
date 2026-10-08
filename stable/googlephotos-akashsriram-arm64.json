@@ -1,6 +1,6 @@
 {
-  "version": "v7.96.0.993165104 (patches 1.14.1.mpp)",
-  "versionCode": 260215,
+  "version": "v7.96.0.993165104 (patches 1.14.2.mpp)",
+  "versionCode": 260216,
   "zipUrl": "https://github.com/nullcpy/rvb/releases/download/stable/google-photos-akashsriram-module-v7.96.0.993165104-arm64-v8a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260215.md"
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260216.md"
 }
