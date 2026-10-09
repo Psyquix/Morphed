@@ -83,7 +83,7 @@
   },
   "crimera/piko": {
     "beta": {
-      "com.twitter.android": "610bb74eea6ec8846eea9fab39ee0f39",
+      "com.twitter.android": "b8ef463a3395befffaaf196a91f1ab8f",
       "shared": "af8e6b25a156bf0a8dd0cc8a238f9f09"
     },
     "stable": {
@@ -282,8 +282,8 @@
   },
   "morpheapp/morphe-patches": {
     "beta": {
-      "com.google.android.apps.youtube.music": "e5cac75ffab7096e7ecf31468e6df198",
-      "com.google.android.youtube": "4d2aec8100f20772157bacd88464c0ac",
+      "com.google.android.apps.youtube.music": "d990c9328f48460ca0fde446b1bfc897",
+      "com.google.android.youtube": "595bdca2db81c60db16a77cc375e926f",
       "shared": "c1967db32611545111e0ab6962a8cda4"
     },
     "stable": {
