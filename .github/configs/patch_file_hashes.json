@@ -87,9 +87,8 @@
       "shared": "af8e6b25a156bf0a8dd0cc8a238f9f09"
     },
     "stable": {
-      "com.instagram.android": "084b5083d2993f8e93436d3ba6df3d7d",
-      "com.twitter.android": "f503d93628dc092e6780f615fef2f6e2",
-      "shared": "b6714c5dbdf40c5dc2eb2bfd60c3667e"
+      "com.twitter.android": "b8ef463a3395befffaaf196a91f1ab8f",
+      "shared": "af8e6b25a156bf0a8dd0cc8a238f9f09"
     }
   },
   "dh6k/morphe-patches": {
@@ -283,7 +282,7 @@
   "morpheapp/morphe-patches": {
     "beta": {
       "com.google.android.apps.youtube.music": "85cc05ef5c59f39524e30d9bbc273781",
-      "com.google.android.youtube": "81cf7e2ac075fe284edbf53bc5bf4e44",
+      "com.google.android.youtube": "2bad6772d15f7203431fd91b4a0d2d2e",
       "shared": "b723e5d632ba985c63d8a3dfce2f8673"
     },
     "stable": {
