@@ -35,17 +35,17 @@ main_config_t=$(toml_get_table_main)
 COMPRESSION_LEVEL=$(toml_get "$main_config_t" compression-level) || COMPRESSION_LEVEL="9"
 # Duplicate-build suppression mode (CI-only, see check_duplicate_build in
 # utils.sh): "log" measures and publishes everything, "enforce" withholds an
-# unchanged rebuild from the release, "off" disables the check. The pool
-# workflow names the active mode (build.yml env RVB_DEDUP_MODE); a config can
-# override it per file; naming neither leaves "log", so a local build can never
-# skip a release by surprise. The env must be the FALLBACK of this read, not a
-# value assigned afterwards — assigning later clobbers the workflow's choice.
-DEDUP_MODE=$(toml_get "$main_config_t" dedup-mode) || DEDUP_MODE="${RVB_DEDUP_MODE:-log}"
-if ! isoneof "$DEDUP_MODE" off log enforce; then
-	abort "ERROR: dedup-mode '$DEDUP_MODE' is not a valid option: only 'off', 'log' or 'enforce' are allowed"
+# unchanged rebuild from the release, "off" disables the check. Tuning knob by
+# ADR 0005: named ONLY by the build.yml job env, never by a config file. The
+# default is the non-destructive one, so a local build can never skip a release
+# by surprise, and the value must be read into the variable it exports — not
+# assigned over it (an assignment after a config-style read clobbered the
+# workflow's choice once already).
+RVB_DEDUP_MODE="${RVB_DEDUP_MODE:-log}"
+if ! isoneof "$RVB_DEDUP_MODE" off log enforce; then
+	abort "ERROR: RVB_DEDUP_MODE '$RVB_DEDUP_MODE' is not a valid option: only 'off', 'log' or 'enforce' are allowed"
 fi
-RVB_DEDUP_MODE="$DEDUP_MODE"
-pr "RVB_DEDUP_MODE: $DEDUP_MODE (config override, workflow env, or log)"
+pr "RVB_DEDUP_MODE: $RVB_DEDUP_MODE"
 REMOVE_RV_INTEGRATIONS_CHECKS=$(toml_get "$main_config_t" remove-rv-integrations-checks) || REMOVE_RV_INTEGRATIONS_CHECKS="false"
 DEF_PATCHES_VER=$(toml_get "$main_config_t" patches-version) || DEF_PATCHES_VER="stable"
 # "both" means "whichever pool this config is for", and the only signal for that is

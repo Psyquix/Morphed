@@ -84,14 +84,14 @@ an identical APK under a new build number falsely notifies every updater
   stability for the other tools is unmeasured), `python3` present, channel
   recognised. Anything missing publishes as today: the check fails toward
   redundancy, never toward a silent drop.
-- **`RVB_DEDUP_MODE`** (`off|log|enforce`). Precedence: a `dedup-mode` key in
-  the config file being built wins, else the `build.yml` env (the pool default,
-  which runs **`enforce`** since the 1388-1391 log phase found one true
-  duplicate, zero false matches and no stale state), else `log` — so a plain
-  local run with neither named only measures. The env is the *fallback of the
-  config read*; assigning it afterwards would clobber the workflow's choice
-  (exactly the bug that kept every pool in log mode after the flip). The
-  resolved value is logged at start of every build. `log` computes and
+- **`RVB_DEDUP_MODE`** (`off|log|enforce`). Tuning knob by
+  [decisions/0005](decisions/0005-tuning-knobs-live-in-the-workflow.md): named
+  **only** by the `build.yml` job env (which runs `enforce` since the 1388-1391
+  log phase found one true duplicate, zero false matches and no stale state) —
+  there is deliberately no config key for it. Unset, as in any local run, it
+  defaults to `log`: measure, never skip. The value is read into the exported
+  variable itself and printed at build start; assigning it after a config-style
+  read is how the workflow's choice got clobbered once. `log` computes and
   compares but skips nothing and mutates no reference.
 - Records: `temp/unchanged/<slug>.json` per skipped app (same survive-the-sweep
   rule as `temp/failures/`), and `temp/hashes/append.<pid>.tsv` lines per fresh
