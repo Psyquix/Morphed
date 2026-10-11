@@ -11,9 +11,13 @@
 # Records (written by scripts/utils.sh + scripts/build.sh), one per app+arch:
 #   <slug>.json    a build that aborted (has <slug>.log alongside)
 #   <slug>_dl.json a build whose download sources were all exhausted
-# Records are regrouped by app base name and rendered in two parts: a Build
-# Failed section (per-arch versionCode + the log link) and a Download Failures
-# section (per-arch versionCode + search-engine links for the APK). Each arch
+#   <slug>_np.json a build the patch set refused for every supported version, so no
+#                  APK was ever fetched (the dl record must not cover it: asking for a
+#                  manual upload of a file nobody wanted is noise)
+# Records are regrouped by app base name and rendered in three parts: a Build
+# Failed section (per-arch versionCode + the log link), a Download Failures section
+# (per-arch versionCode + search-engine links for the APK) and a Patch Compatibility
+# section (the versions the bundle refused + the bundle link to complain to). Each arch
 # carries its own version so an app that resolved a different version per arch
 # never renders a wrong shared version.
 #
@@ -80,11 +84,12 @@ declare -A BREC DREC BORDERSET DORDERSET
 BORDER=""; DORDER=""
 shopt -s nullglob
 for json in "$FAILURES_DIR"/*.json; do
-	case "$json" in *_dl.json) continue ;; esac
+	case "$json" in *_dl.json | *_np.json) continue ;; esac
 	slug="$(basename "${json%.json}")"
-	# A cascaded case (download exhausted, then build failed) is reported once,
-	# as the build failure; drop its dl twin.
+	# A cascaded case (download exhausted, or the patch set refused, then the build
+	# itself failed) is reported once, as the build failure; drop its twins.
 	[ -f "$FAILURES_DIR/${slug}_dl.json" ] && rm -f "$FAILURES_DIR/${slug}_dl.json"
+	[ -f "$FAILURES_DIR/${slug}_np.json" ] && rm -f "$FAILURES_DIR/${slug}_np.json"
 
 	app="$(jq -r '.app // empty' "$json")"
 	arch="$(jq -r '.arch // empty' "$json")"
@@ -116,6 +121,26 @@ for json in "$FAILURES_DIR"/*_dl.json; do
 	DREC[$base]+="${arch}|${ver}|${vc}|||${pkg}${NL}"
 	[ -z "${DORDERSET[$base]:-}" ] && { DORDER+="${base}${NL}"; DORDERSET[$base]=1; }
 done
+
+# Patch-compatibility rejections: no APK was fetched, so the "version" slot carries the
+# versions the bundle refused and the patches slot names the bundle to fix.
+declare -A NREC NORDERSET
+NORDER=""
+for json in "$FAILURES_DIR"/*_np.json; do
+	app="$(jq -r '.app // empty' "$json")"
+	arch="$(jq -r '.arch // empty' "$json")"
+	patches="$(jq -r '.patches_src // empty' "$json")"
+	pkg="$(jq -r '.pkg // empty' "$json")"
+	# ".tried" is a comma list of version names; render each with its v prefix.
+	tried="$(jq -r '.tried // empty' "$json")"
+	ver="$(printf '%s' "$tried" | tr ',' '\n' | sed -e 's/^v//' -e '/^$/d' -e 's/^/v/' | paste -sd ' ' -)"
+	vc="$(jq -r '.vc // empty' "$json")"
+	base="$(app_base "$app" "$arch")"
+	# Same six columns as the other modes (arch|ver|vc|log|patches|pkg); the log is
+	# absent because build_rv returned clean.
+	NREC[$base]+="${arch}|${ver}|${vc}||${patches}|${pkg}${NL}"
+	[ -z "${NORDERSET[$base]:-}" ] && { NORDER+="${base}${NL}"; NORDERSET[$base]=1; }
+done
 shopt -u nullglob
 
 # arch_token <ver> <vc> — the `v<version> (<versionCode>)` code span for one arch
@@ -134,9 +159,10 @@ search_links() { # $1=pkg $2=base $3=ver(label, maybe 'vX')
 	printf '[Search Google](https://www.google.com/search?q=%s) / [DuckDuckGo](https://duckduckgo.com/?q=%s) / [Brave](https://search.brave.com/search?q=%s)' "$enc" "$enc" "$enc"
 }
 
-# render_app_group <base> <blob> <mode build|dl> — one grouped app block. Both
-# modes list each arch as "arch `vX (vc)`: <link>"; build links the log, download
-# links the search engines. Build adds a Patches line naming the failing bundle.
+# render_app_group <base> <blob> <mode build|dl|np> — one grouped app block. All
+# modes list each arch as "arch `vX (vc)`: <link>"; build links the log, download links
+# the search engines, np links the patch bundle that refused the versions. Build adds a
+# Patches line naming the failing bundle.
 render_app_group() { # $1=base $2=blob $3=mode
 	local base=$1 blob=$2 mode=$3 out arch ver vc log patches pkg tok links
 	out="📱 $(md_clean "$base")"
@@ -150,6 +176,10 @@ render_app_group() { # $1=base $2=blob $3=mode
 		if [ "$mode" = build ]; then
 			[ -z "$log" ] && { out+="${NL}  ╰ ${arch}${tok:+ ${tok}}"; continue; }
 			links="[Log](${log})"
+		elif [ "$mode" = np ]; then
+			# No log, no APK to hunt for: the bundle is the thing that has to change.
+			[ -z "$patches" ] && { out+="${NL}  ╰ ${arch}${tok:+ ${tok}}"; continue; }
+			links="[Patch bundle](https://github.com/$patches)"
 		else
 			links="$(search_links "$pkg" "$base" "$ver")"
 		fi
@@ -158,10 +188,10 @@ render_app_group() { # $1=base $2=blob $3=mode
 	printf '%s' "$out"
 }
 
-# ---- Assemble the two parts ----
+# ---- Assemble the three parts ----
 # Render each app block first and count only the ones that produce output, so a
 # part never prints its "(N apps)" header over an empty body.
-build_body=""; dl_body=""; cbuild=0; cdl=0
+build_body=""; dl_body=""; np_body=""; cbuild=0; cdl=0; cnp=0
 while IFS= read -r base; do
 	[ -z "$base" ] && continue
 	blk="$(render_app_group "$base" "${BREC[$base]}" build)"
@@ -170,12 +200,18 @@ while IFS= read -r base; do
 done <<< "$BORDER"
 while IFS= read -r base; do
 	[ -z "$base" ] && continue
+	blk="$(render_app_group "$base" "${NREC[$base]:-}" np)"
+	[ -z "${blk//[[:space:]]/}" ] && continue
+	np_body+="${blk}${NL}${NL}"; cnp=$((cnp + 1))
+done <<< "$NORDER"
+while IFS= read -r base; do
+	[ -z "$base" ] && continue
 	blk="$(render_app_group "$base" "${DREC[$base]}" dl)"
 	[ -z "${blk//[[:space:]]/}" ] && continue
 	dl_body+="${blk}${NL}${NL}"; cdl=$((cdl + 1))
 done <<< "$DORDER"
 
-if [ "$cbuild" = 0 ] && [ "$cdl" = 0 ]; then
+if [ "$cbuild" = 0 ] && [ "$cdl" = 0 ] && [ "$cnp" = 0 ]; then
 	echo "Failure records present but nothing renderable; no report sent."
 	exit 0
 fi
@@ -183,6 +219,10 @@ fi
 MSG=""
 if [ "$cbuild" -gt 0 ]; then
 	MSG+="*🚨 Build Failed (${cbuild} app$([ "$cbuild" = 1 ] && echo '' || echo 's'))*${NL}${NL}${build_body}"
+fi
+if [ "$cnp" -gt 0 ]; then
+	[ -n "$MSG" ] && MSG+="${NL}"
+	MSG+="*🧩 Patch Compatibility (${cnp} app$([ "$cnp" = 1 ] && echo '' || echo 's'))*${NL}${NL}${np_body}"
 fi
 if [ "$cdl" -gt 0 ]; then
 	[ -n "$MSG" ] && MSG+="${NL}"
@@ -194,6 +234,9 @@ while [ "${MSG%$'\n'}" != "$MSG" ]; do MSG="${MSG%$'\n'}"; done
 
 if [ "$cbuild" -gt 0 ]; then
 	MSG+="${NL}${NL}⚠️ Report the issue to the patch author with the log link."
+fi
+if [ "$cnp" -gt 0 ]; then
+	MSG+="${NL}${NL}⚠️ These versions have no patch to apply (or no build for that arch): the bundle must catch up."
 fi
 if [ "$cdl" -gt 0 ]; then
 	MSG+="${NL}${NL}ℹ️ Upload the APK to the [cache repo](https://github.com/${APKS_REPO:-nullcpy/apks}) manually."
