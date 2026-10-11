@@ -26,7 +26,7 @@ render_message() {
 	if [ -n "${WF_NAME:-}" ]; then
 		local wf_url="${GITHUB_SERVER_URL:-https://github.com}/${REPO}/actions/runs/${GITHUB_RUN_ID}"
 		MSG="🔴 [$(md "${WF_NAME}") #${GITHUB_RUN_NUMBER} failed](${wf_url}) in ${REPO_MD}${NL}${NL}"
-		MSG+="🌿 \`$(md "${REF_NAME}")\` • by ${ACTOR_MD}"
+		MSG+="🌿 \`$(md "${REF_NAME}")\` • ${ACTOR_MD}"
 
 	elif [ "${EVENT_NAME:-}" = "pull_request" ]; then
 		TITLE="$(md "${PR_TITLE}")"
