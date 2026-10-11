@@ -39,6 +39,11 @@ to `-`) is identical in the pooled child, the serial parent and the CI step.
   all, and every version tried through every source with nothing accepted — the
   second one used to skip silently, because returning 0 makes the parent delete the
   app's `<slug>.json` as a clean return, and only the `_dl` name survives that sweep.
+- **Patch-set rejection** — writing `temp/failures/<slug>_np.json` (`tried` lists the
+  versions the bundle refused) and returning 0. Kept separate from `_dl` because it
+  means the opposite: no source failed and no APK is missing, the patch set has
+  nothing to apply for this version set or this arch, so the report names the bundle
+  instead of asking for an upload ([decisions/0009](decisions/0009-effective-patch-set-decides-compatibility.md)).
 
 `temp/failures/` is wiped at the START of `build.sh` and deliberately survives the
 end-of-run sweep, so the `build.yml` "Report build failures" step can read it.
@@ -165,9 +170,20 @@ for adding surface without a measured gain
    precedence: explicit `version` from the config (a tag, or `exp`/`latest`/`beta`)
    → the version the patch bundle advertises under `auto` (a tested compatibility
    guarantee) → `state/app_versions.json` (only when the CLI advertises nothing) →
-   live latest from the source. The target `versionCode` is derived from patch
-   metadata only, and `has_compatible_patches` gates the build on the bundle
-   actually covering the resolved version.
+   live latest from the source. What the bundle "advertises" is the version set of
+   the patches that will actually be applied: `_effective_patch_versions` reads
+   `list-patches` restricted to the `included-patches` names when they are set (they
+   reach the CLI as `-e` and apply even when the bundle ships them `Enabled: false`)
+   and `list-versions` — which counts only the default-enabled set — when they are
+   not. The same table supplies the target `versionCode` and answers
+   `has_compatible_patches`, so a version can never be advertised by one function and
+   rejected by the other ([decisions/0009](decisions/0009-effective-patch-set-decides-compatibility.md)).
+   A candidate whose version-code annotation lists other ABIs only is redirected, not
+   dropped: if another supported version is viable for the arch it takes its place
+   (that is what lets one app publish arm64 at one version and arm-v7a at another),
+   and when none of them mentions the arch the download proceeds and the artifact-bytes
+   gate above decides — the annotation records what the patch author tested, not what
+   the store ships. `arch=all`/`auto` never filters.
 4. **Stock acquisition** — see the source order below. Bundles
    (`.xapk`/`.apkm`/`.apks`) are kept whole and handed to morphe untouched when
    `RVB_MORPHE_PASSTHROUGH=true` (morphe merges natively, and some APKs misbehave
@@ -225,7 +241,7 @@ in; the first source that yields a verified artifact **carrying the requested ar
 
 | # | Source | Notes |
 |---|---|---|
-| 1 | `cache_repo` | `nullcpy/apks` — release per package name, download-only (never used to list versions) → [cache-repo.md](cache-repo.md) |
+| 1 | `cache_repo` | `nullcpy/apks` — release per package name, download-only (never used to list versions) → [cache-repo.md](cache-repo.md). No release for the package means it has never been uploaded (every app's first build), which is logged as a cache miss, not as a failed request |
 | 2 | `direct` | a straight file URL in the config |
 | 3 | `github` | release assets, filtered by `github-release-regex` / `github-regex`, arch-mapped |
 | 4 | `archive` | `archive.org` item, the long-term fallback for delisted versions |

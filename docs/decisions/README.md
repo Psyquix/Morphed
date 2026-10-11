@@ -39,6 +39,7 @@ document.
 | [0006](0006-filename-parsing-is-imported-not-mirrored.md) | Filename parsing is imported across the repo boundary, never mirrored | `naming.py`, the site's catalogue rebuild |
 | [0007](0007-requested-arch-is-a-hard-requirement.md) | A requested build arch is a hard requirement; no mislabeled artifacts | `build_rv` download gate, download-link index, published arch names |
 | [0008](0008-signing-identity-is-secret-only.md) | The signing identity is a secret, never a repository file | `install_keystore.sh`, `RVB_KEYSTORE*`, keystore secrets, every published artifact's signer |
+| [0009](0009-effective-patch-set-decides-compatibility.md) | The patch set that will be applied decides compatibility | `has_compatible_patches`, version resolution, candidate arch filter, `temp/failures/*_np.json` |
 
 Candidates still unwritten, because the reasoning currently lives only in commit
 messages: pinning a patch source's `patches-version` to a tag vs resolving the
