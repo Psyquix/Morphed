@@ -114,6 +114,44 @@ for fx in "${FIXTURES[@]}"; do
 			pargs=$(toml_get "$t" patcher-args) || pargs=""
 			inc=$(toml_get "$t" included-patches) || inc=""
 			exc=$(toml_get "$t" excluded-patches) || exc=""
+
+			# The included-patches path: which versions the named patches declare, whether
+			# the gate accepts them while the CLI's own default-set listing says nothing,
+			# and what each build arch's verdict is. Only emitted for configs that name
+			# patches, so the other goldens stay byte-identical. Every call here is made
+			# DIRECTLY (never through $( )) because the engine's memo tables are written
+			# by the caller's process: a subshell would re-run the JVM for each marker and
+			# the ARGS lines would record harness noise instead of build_rv's real calls.
+			if [ -n "$inc" ]; then
+				_eff=""
+				_eff_rc=0
+				_eff_file="$run_dir/eff_versions.txt"
+				_effective_patch_versions "$cli_jar" "$patches_jar_all" "$pkg" "$cli_src" named "$inc" \
+					> "$_eff_file" 2> /dev/null || _eff_rc=$?
+				_eff=$(cat "$_eff_file" 2> /dev/null)
+				echo "EFFECTIVE_PATCH_VERSIONS(named): rc=$_eff_rc"
+				printf '%s\n' "$_eff" | sed -e '/^[[:space:]]*$/d' -e 's/^/  /'
+				_v=$(printf '%s\n' "$_eff" | cut -f1 | grep -v '^Any$' | head -1)
+				if [ -n "$_v" ]; then
+					_has_rc=0
+					has_compatible_patches "$cli_jar" "$patches_jar_all" "$pkg" "$_v" "$cli_src" "$inc" \
+						> /dev/null 2>&1 || _has_rc=$?
+					echo "HAS_COMPATIBLE_PATCHES(named,hit): rc=$_has_rc"
+					for _a in arm64-v8a arm-v7a; do
+						_pin_rc=0
+						_pin=$(_effective_arch_verdict "$_eff" "$_v" "$_a") || _pin_rc=$?
+						if [ "$_pin_rc" != 0 ]; then
+							echo "  ARCH_VERDICT($_v,$_a): refused"
+						else
+							echo "  ARCH_VERDICT($_v,$_a): pin=${_pin:-none}"
+						fi
+					done
+				fi
+				_has_rc=0
+				has_compatible_patches "$cli_jar" "$patches_jar_all" "$pkg" "9.9.9" "$cli_src" "$inc" \
+					> /dev/null 2>&1 || _has_rc=$?
+				echo "HAS_COMPATIBLE_PATCHES(named,miss): rc=$_has_rc"
+			fi
 			# Emulate build_rv's per-bundle ed string with the engine's own
 			# helpers (utils.sh join_args/list_args), bundles joined by '|'.
 			per_bundle_ed=""

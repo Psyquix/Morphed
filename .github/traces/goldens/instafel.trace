@@ -17,6 +17,8 @@ PATCHES_LIST:
   patch names:
    unlock_developer_options
    remove_ads
+EFFECTIVE_PATCH_VERSIONS(named): rc=1
+HAS_COMPATIBLE_PATCHES(named,miss): rc=0
 PATCH_APK:
   rc=0 patched_exists=yes
 --- app: Instagram-InstaFel-Clone ---
@@ -32,6 +34,8 @@ PATCHES_LIST:
   patch names:
    unlock_developer_options
    remove_ads
+EFFECTIVE_PATCH_VERSIONS(named): rc=1
+HAS_COMPATIBLE_PATCHES(named,miss): rc=0
 PATCH_APK:
   rc=0 patched_exists=yes
 ARGS: [--enable-native-access=ALL-UNNAMED] [-jar] [temp/github__instafel__p-rel-rv/instafel-0.3.jar] [list]

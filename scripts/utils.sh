@@ -92,6 +92,7 @@ declare -gA __PATCHES_LIST_CACHE__
 declare -gA __PATCH_VER_CACHE__
 declare -gA __PKG_VERS_CACHE__
 declare -gA __DL_RESP_CACHE__
+declare -gA __EFF_PATCH_VER_CACHE__
 
 # Patcher tool registry: resolve_patcher() + PATCHER_* flags.
 # RVB_PATCHERS_SH lets the trace harness point at it when utils.sh is sourced
@@ -224,7 +225,8 @@ abort() {
 # the CI step consumes them. Kept notification-free on purpose (no Telegram/curl
 # here) so the engine stays pure. A build failure leaves <slug>.json (descriptor)
 # plus <slug>.log (attached by build.sh's parent); a download-exhaustion leaves
-# only <slug>_dl.json. All fail-soft: a write error never aborts a build.
+# only <slug>_dl.json; a patch-set rejection leaves only <slug>_np.json. All
+# fail-soft: a write error never aborts a build.
 #
 # The slug is derived from the display label "$table" (which already carries the
 # arch, e.g. "Foo (arm64-v8a)"), lowercased with every non-alphanumeric run
@@ -259,6 +261,24 @@ write_dl_failure_descriptor() { # $1=slug $2=app $3=version $4=vc $5=arch $6=pkg
 		--arg vc "$4" --arg arch "$5" --arg pkg "$6" \
 		'{type:$type, app:$app, version:$version, vc:$vc, arch:$arch, pkg:$pkg}' \
 		> "$dir/$1_dl.json" 2> /dev/null || true
+}
+
+# write_no_patches_failure_descriptor — record that every supported version of this
+# app was rejected by the patch set (no compatible patch, or no build for the
+# requested arch), so NOTHING was ever fetched. Distinct from the dl record above:
+# reporting this one as a download failure asks for a manual APK upload of a file that
+# is already cached and sends the patch author no message at all. Like the dl record
+# it uses its own suffix, because the parent deletes <slug>.json/.log on a clean (rc 0)
+# return and build_rv skips with rc 0 here.
+# $1=slug $2=app $3=versions-tried $4=requested $5=vc $6=arch $7=patches_src $8=pkg
+write_no_patches_failure_descriptor() {
+	[ -n "${TEMP_DIR:-}" ] || return 0
+	local dir="$TEMP_DIR/failures"
+	mkdir -p "$dir" 2> /dev/null || return 0
+	jq -n --arg type "no_compatible_patches" --arg app "$2" --arg tried "$3" \
+		--arg version "$4" --arg vc "$5" --arg arch "$6" --arg patches_src "$7" --arg pkg "$8" \
+		'{type:$type, app:$app, tried:$tried, version:$version, vc:$vc, arch:$arch, patches_src:$patches_src, pkg:$pkg}' \
+		> "$dir/$1_np.json" 2> /dev/null || true
 }
 # env -i keeps JVM runs hermetic; XDG_DATA_HOME is forwarded so callers can
 # relocate an app's per-user state dir out of the shared HOME (see the
@@ -905,24 +925,24 @@ _get_patch_last_supported_ver() {
 	local list_patches=$1 pkg_name=$2 inc_sel=${3:-} _exc_sel=${4:-} _exclusive=${5:-} cli_source=${6:-} cli_jar=${7:-} patches_jar=${8:-}
 	local op
 	if [ "$inc_sel" ]; then
-		if ! op=$(awk '{$1=$1}1' <<<"$list_patches"); then
-			epr "list-patches: '$op'"
-			return 1
+		# Rank the versions the named patches declare - the table carries one occurrence
+		# per declaring patch, so this still prefers the version the most patches agree
+		# on - and takes the two highest. It is read from the same listing the
+		# compatibility gate consults, so a version can never be advertised here and
+		# rejected there.
+		local _vs="" _ev=""
+		if _ev=$(_effective_patch_versions "$cli_jar" "$patches_jar" "$pkg_name" "$cli_source" named "$inc_sel"); then
+			_vs=$(cut -f1 <<<"$_ev" | sed -e '/^$/d' -e '/^Any$/d' | sort | uniq -c | sort -k1,1nr | awk '
+					NR==1 { max=$1; print $2; next }
+					$1==max { print $2 }
+				' | sort_vers) || _vs=""
 		fi
-		local ver vers="" NL=$'\n'
-		while IFS= read -r line; do
-			line="${line:1:${#line}-2}"
-			ver=$(sed -n "/^Name: $line\$/,/^\$/p" <<<"$op" | sed -n "/^Compatible versions:\$/,/^\$/p" | tail -n +2 | sed 's/ \[.*//')
-			vers="${vers}${ver}${NL}"
-		done <<<"$(list_args "$inc_sel")"
-		vers=$(awk '{$1=$1}1' <<<"$vers")
-		if [ -n "$vers" ]; then
-			echo "$vers" | tr ' ' '\n' | sort | uniq -c | sort -k1,1nr | awk '
-				NR==1 { max=$1; print $2; next }
-				$1==max { print $2 }
-			' | sort_vers
+		if [ -n "$_vs" ]; then
+			echo "$_vs"
 			return
 		fi
+		# Names that match no version block: fall through to the CLI's own counting,
+		# which is what happened before this table existed.
 	fi
 	op=$(patches_list_versions "$cli_jar" "$patches_jar" "$pkg_name" "$cli_source") || return 1
 	op=$(sed -n '/Most common compatible versions:/,$p' <<<"$op" | sed '1d' | awk '{$1=$1}1')
@@ -958,13 +978,8 @@ get_patch_exp_ver() {
 
 get_patch_version_code() {
 	local raw_op="$1" version="$2" arch="${3:-}"
-	local abi=""
-	case "${arch,,}" in
-		arm64-v8a|arm64) abi="ARM64_V8A" ;;
-		arm-v7a|armeabi-v7a|arm) abi="ARMEABI_V7A" ;;
-		x86_64) abi="X86_64" ;;
-		x86) abi="X86" ;;
-	esac
+	local abi
+	abi=$(_abi_token_of_arch "$arch")
 
 	local line="" l
 	while IFS= read -r l; do
@@ -976,6 +991,10 @@ get_patch_version_code() {
 
 	if [[ "$line" =~ \[versionCodes:[[:space:]]*([^]]+)\] ]]; then
 		local vcodes="${BASH_REMATCH[1]}"
+		# Canonicalize the ABI spelling (ARM64_V8A and arm64-v8a both occur in the
+		# wild) so this and _effective_arch_verdict read the same token.
+		vcodes="${vcodes^^}"
+		vcodes="${vcodes//-/_}"
 		if [ -n "$abi" ]; then
 			if [[ "$vcodes" =~ ${abi}=([0-9]+) ]]; then
 				echo "${BASH_REMATCH[1]}"
@@ -1059,6 +1078,13 @@ _cache_target_vc() {
 			local raw_vers
 			if raw_vers=$(patches_list_versions "$cli_jar" "$patches_jar" "$pkg_name" "${args[cli_source]:-}" "$cli_lv_extra"); then
 				target=$(get_patch_version_code "$raw_vers" "$1" "$2" || true)
+			fi
+			# list-versions counts only the patches used by default, so a bundle whose
+			# app patches ship disabled carries no annotation for it here. The effective
+			# table knows the code the named patches tested, and without it the cache key
+			# and the post-download check would both go unverified.
+			if [ -z "$target" ]; then
+				target=$(_patch_arch_verdict "$1" "$2" || true)
 			fi
 		fi
 	fi
@@ -1290,6 +1316,230 @@ _patches_list() {
 	echo "$op"
 }
 
+# Map a build arch onto the ABI token a patch bundle uses in its version-code
+# annotation ("[versionCodes: ARM64_V8A=3327]" / "3.15.3: ARM64_V8A=3327"). The one
+# mapping for the whole engine: get_patch_version_code, the candidate verdict and the
+# cache probes all read it, so a token spelling cannot drift between them.
+_abi_token_of_arch() { # $1=build arch
+	case "${1,,}" in
+		arm64-v8a | arm64) echo "ARM64_V8A" ;;
+		arm-v7a | armeabi-v7a | arm) echo "ARMEABI_V7A" ;;
+		x86_64) echo "X86_64" ;;
+		x86) echo "X86" ;;
+		*) echo "" ;;
+	esac
+}
+
+# The version set of the patches that will ACTUALLY be applied for one package
+# (docs/decisions/0009).
+#
+# Why this exists: included-patches names are handed to the CLI as -e arguments, so
+# they apply whether or not the bundle marks them Enabled. Morphe's list-versions
+# counts only the patches "used by default" (-u is what widens it), so a bundle whose
+# app patches ship disabled answers list-versions with nothing at all - and the
+# compatibility gate then rejects every version the resolver just advertised from the
+# same bundle (OfflineGames-ggYasin, where every com.JindoBlu.OfflineGames patch in
+# ggYasin/ggyasin-morphe-patches v1.6.0 ships Enabled: false). The two questions have
+# to be answered from one table, so -u is deliberately NOT used anywhere: widening
+# list-versions would also make the resolver advertise versions supported only by
+# patches that never get applied.
+#
+# $1=cli_jar $2=bundles $3=pkg $4=cli_source $5=mode $6=included-patches group (named)
+#   mode "named"   -> the patches listed in $6, read out of list-patches
+#   mode "default" -> the patches the CLI itself counts, read out of list-versions
+# stdout: "<version>\t<ABI=vc[ ABI=vc]>" - one occurrence per declaring patch, so a
+#   caller can rank versions by how many patches support them; "Any\t" for a patch
+#   that puts no version constraint. Leading "v" is stripped, tokens are as printed.
+# rc: 0 table | 1 no listing (CLI failed / printed nothing: caller stays permissive)
+#     2 the CLI answered but declares no version (caller runs its own logic)
+_effective_patch_versions() {
+	local cli_jar=$1 patches_jar=$2 pkg_name=$3 cli_source=$4 mode=${5:-named} inc=${6:-}
+	[ -n "$cli_jar" ] && [ -n "$patches_jar" ] && [ -n "$pkg_name" ] || return 1
+	resolve_patcher "$cli_source"
+	[ "${PATCHER_HAS_PATCH_LIST:-false}" = true ] || return 1
+
+	local key="${mode}|${cli_jar}|${patches_jar}|${pkg_name}|${cli_source}|${inc}"
+	local cached="${__EFF_PATCH_VER_CACHE__["$key"]:-}"
+	if [ -n "$cached" ]; then
+		[ "$cached" = "@fail" ] && return 1
+		[ "$cached" = "@none" ] && return 2
+		printf '%s\n' "$cached"
+		return 0
+	fi
+
+	local listing out
+	if [ "$mode" = named ]; then
+		[ -n "$inc" ] || { __EFF_PATCH_VER_CACHE__["$key"]="@fail"; return 1; }
+		if ! listing=$(patches_list "$cli_jar" "$patches_jar" "$pkg_name" "$cli_source"); then
+			__EFF_PATCH_VER_CACHE__["$key"]="@fail"
+			return 1
+		fi
+		# Names arrive in the TOML group shape ("'A' 'B'"), possibly one group per
+		# bundle joined with '|'. Flatten, then strip only the OUTER quote pair: an
+		# apostrophe inside a name ("Keep the screen's refresh rate") must survive, and
+		# it does here exactly as it does in the version-unpinned matcher below.
+		local names
+		names=$(list_args "${inc//|/ }" | sed -e "s/^'//" -e "s/'\$//" -e 's/^"//' -e 's/"$//')
+		# Names and listing share one stream: the awk pass reads the wanted names until
+		# the sentinel, then the listing. Passed this way rather than through -v because
+		# -v re-interprets backslash escapes in a multi-line value.
+		out=$(printf '%s\n__RVB_EFF_NAMES__\n%s\n' "$names" "$listing" | awk -v sent="__RVB_EFF_NAMES__" '
+			function flush(  i, v) {
+				if (active) {
+					if (anyv) printf "Any\t\n"
+					for (i = 1; i <= nv; i++) { v = vers[i]; printf "%s\t%s\n", v, abis[v] }
+				}
+				nv = 0; delete vers; delete abis; anyv = 0; sect = ""; active = 0
+			}
+			{ t = $0; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t) }
+			!named { if (t == sent) named = 1; else if (t != "") want[t] = 1; next }
+			t ~ /^Name:/ {
+				flush(); nm = substr(t, 6); sub(/^[ \t]+/, "", nm); sub(/[ \t]+$/, "", nm)
+				active = (nm in want); next
+			}
+			t ~ /^(INFO: )?Index:/ { flush(); next }
+			t ~ /^Compatible versions:/ { if (active) sect = "ver"; next }
+			t ~ /^Version codes:/ { if (active) sect = "vc"; next }
+			# Any other patch-level field closes the block being collected. Enumerated
+			# rather than pattern-matched on "word:" so a wrapped description that
+			# happens to contain a colon cannot truncate the version list.
+			t ~ /^(Enabled|Description|Options|Requires|Version|Compatible packages|Min version|UUID|Author|Package name):/ { sect = ""; next }
+			!active { next }
+			sect == "ver" && t == "Any" { anyv = 1; next }
+			sect == "ver" && t ~ /^[vV]?[0-9]/ { sub(/^[vV]/, "", t); nv++; vers[nv] = t; next }
+			sect == "vc" && t ~ /^[vV]?[0-9][^:]*: .*=/ {
+				p = index(t, ":"); v = substr(t, 1, p - 1); r = substr(t, p + 1)
+				sub(/^[vV]/, "", v); gsub(/[ \t]+/, " ", r); sub(/^ /, "", r); sub(/ $/, "", r)
+				found = 0
+				for (i = 1; i <= nv; i++) if (vers[i] == v) { found = 1; break }
+				if (!found) { nv++; vers[nv] = v }
+				abis[v] = (abis[v] == "" ? r : abis[v] " " r)
+				next
+			}
+			END { flush() }')
+	else
+		if ! listing=$(patches_list_versions "$cli_jar" "$patches_jar" "$pkg_name" "$cli_source" "$PATCHER_LIST_X"); then
+			__EFF_PATCH_VER_CACHE__["$key"]="@fail"
+			return 1
+		fi
+		[ -n "$listing" ] || { __EFF_PATCH_VER_CACHE__["$key"]="@fail"; return 1; }
+		out=$(awk '
+			function trimv(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+			{ t = $0; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t) }
+			t == "" { next }
+			t ~ /^INFO:/ { next }
+			t ~ /^Most common compatible versions:/ { next }
+			t ~ /^Package name:/ { next }
+			t == "Any" { printf "Any\t\n"; next }
+			t !~ /^[vV]?[0-9]/ { next }
+			{
+				abis = ""; q = index(t, "[versionCodes:")
+				if (q) {
+					r = substr(t, q + 14)
+					if (sub(/\].*/, "", r)) { gsub(/[ \t]+/, " ", r); sub(/^ /, "", r); sub(/ $/, "", r); abis = r }
+				}
+				v = substr(t, 1, q ? q - 1 : length(t))
+				sub(/ \(.*$/, "", v); v = trimv(v); sub(/^[vV]/, "", v)
+				if (v == "") next
+				printf "%s\t%s\n", v, abis
+			}' <<<"$listing")
+	fi
+
+	if [ -z "$out" ]; then
+		__EFF_PATCH_VER_CACHE__["$key"]="@none"
+		return 2
+	fi
+	__EFF_PATCH_VER_CACHE__["$key"]="$out"
+	printf '%s\n' "$out"
+}
+
+# What one candidate version means for one build arch, decided over the effective
+# table. A version whose annotation lists other ABIs only has no build for this arch,
+# so the engine must not fetch it (ADR 0007 makes the arch a hard requirement and the
+# post-download gate would reject the bytes anyway - the fetch is pure waste).
+# $1=table $2=version $3=arch
+# stdout: the versionCode when the table pins exactly one for this arch
+# rc: 0 buildable (pinned, or not annotated at all) | 1 annotated without this arch
+_effective_arch_verdict() {
+	local tab=$1 ver=$2 arch=$3 abi
+	ver="${ver#v}"; ver="${ver#V}"
+	abi=$(_abi_token_of_arch "$arch")
+	# all / auto / an unmapped arch: nothing to filter or pin on.
+	[ -z "$abi" ] && return 0
+	awk -F'\t' -v ver="$ver" -v abi="$abi" '
+		# Bundles print the token either as ARM64_V8A or arm64-v8a; both spellings
+		# mean the same ABI, so the comparison is canonicalized on both sides.
+		function canon(s) { gsub(/-/, "_", s); return toupper(s) }
+		$1 != ver { next }
+		{
+			total++
+			if ($2 == "") { uncon = 1; next }
+			n = split($2, tok, " ")
+			for (i = 1; i <= n; i++) {
+				if (tok[i] == "") continue
+				p = index(tok[i], "=")
+				if (p < 2) continue
+				k = canon(substr(tok[i], 1, p - 1)); val = substr(tok[i], p + 1)
+				seen[k] = 1
+				if (k in code) { if (code[k] != val) code[k] = "@amb" } else code[k] = val
+			}
+			constrained++
+		}
+		END {
+			if (total == 0) exit 0
+			if (!constrained || uncon) exit 0
+			if (!(canon(abi) in seen)) exit 1
+			if (code[canon(abi)] != "" && code[canon(abi)] != "@amb") printf "%s", code[canon(abi)]
+			exit 0
+		}' <<<"$tab"
+}
+
+# Does one effective table mention a version at all? $1=table $2=version (stripped)
+_table_has_version() { awk -F'\t' -v ver="$2" '$1 == ver { found = 1 } END { exit !found }' <<<"$1"; }
+
+# Verdict for one version+arch across both tables: the named patches decide when they
+# know the version, otherwise the default set does. Echoes a versionCode or nothing;
+# rc 1 means the version is annotated for other ABIs only (skip the candidate).
+_patch_arch_verdict() { # $1=version $2=arch  (reads build_rv scope: cli_jar, patches_jar, pkg_name, args)
+	local tab v="${1#v}"
+	v="${v#V}"
+	if [ -n "${args[included_patches]:-}" ]; then
+		tab=$(_effective_patch_versions "$cli_jar" "$patches_jar" "$pkg_name" "${args[cli_source]:-}" named "${args[included_patches]}") || tab=""
+		if [ -n "$tab" ] && _table_has_version "$tab" "$v"; then
+			_effective_arch_verdict "$tab" "$v" "$2"
+			return $?
+		fi
+	fi
+	tab=$(_effective_patch_versions "$cli_jar" "$patches_jar" "$pkg_name" "${args[cli_source]:-}" default) || tab=""
+	[ -n "$tab" ] && _table_has_version "$tab" "$v" || return 0
+	_effective_arch_verdict "$tab" "$v" "$2"
+}
+
+# What build_rv does with one candidate version for one requested arch.
+# $1=version $2=arch $3=the whole candidate list (space separated)
+# stdout: the versionCode when the annotation pins one for this arch
+# rc: 0 build it | 1 skip it - another supported version is viable for this arch and
+#     should take the slot instead
+# The annotation records what the patch author tested, not what the store ships, so it
+# is only allowed to REDIRECT: when no candidate mentions the arch the download
+# proceeds and _artifact_satisfies_arch judges the bytes (docs/decisions/0009).
+_candidate_arch_verdict() {
+	local vc="" cand v="${1#v}"
+	if vc=$(_patch_arch_verdict "$1" "$2"); then
+		printf '%s' "$vc"
+		return 0
+	fi
+	for cand in $3; do
+		cand="${cand#v}"
+		if [ -z "$cand" ] || [ "$cand" = "$v" ]; then continue; fi
+		if _patch_arch_verdict "$cand" "$2" > /dev/null 2>&1; then
+			return 1
+		fi
+	done
+	pr "No supported version declares a '$2' build; trying v${v} and letting the artifact bytes decide."
+	return 0
+}
+
 has_compatible_patches() {
 	local cli_jar=$1 patches_jar=$2 pkg_name=$3 version=$4 cli_source=$5
 	local inc_patches=${6:-}
@@ -1299,35 +1549,36 @@ has_compatible_patches() {
 	fi
 	[ -z "$cli_jar" ] || [ -z "$patches_jar" ] || [ -z "$pkg_name" ] || [ -z "$version" ] && return 0
 
-	local extra_args="$PATCHER_LIST_X"
-
-	local raw_vers
-	if ! raw_vers=$(patches_list_versions "$cli_jar" "$patches_jar" "$pkg_name" "$cli_source" "$extra_args") || [ -z "$raw_vers" ]; then
-		return 0
-	fi
-
 	local ver_clean="${version// /}"
 	ver_clean="${ver_clean#v}"
 	ver_clean="${ver_clean#V}"
-	local line v_raw v_clean
-	while IFS= read -r line; do
-		[[ "$line" =~ ^[[:space:]]*INFO: ]] && continue
-		[[ "$line" =~ ^[[:space:]]*Most[[:space:]]common ]] && continue
 
-		if [[ "$line" =~ ^[[:space:]]*Any([[:space:]]|$) ]]; then
-			return 0
-		fi
+	# Pinned scan over the patch set that will actually be applied: the included-patches
+	# names when configured (those reach the CLI as -e and apply whatever the bundle
+	# marks them), then the default set list-versions counts on its own. Consulting both
+	# keeps a bundle whose app patches ship default-disabled buildable, and keeps a config
+	# whose names match nothing on exactly the list-versions behaviour it had before.
+	local _named="" _default="" _default_rc=0
+	if [ -n "$inc_patches" ]; then
+		_named=$(_effective_patch_versions "$cli_jar" "$patches_jar" "$pkg_name" "$cli_source" named "$inc_patches") || _named=""
+	fi
+	_default=$(_effective_patch_versions "$cli_jar" "$patches_jar" "$pkg_name" "$cli_source" default) || _default_rc=$?
 
-		# Strip patch count and versionCodes metadata: e.g. " (4 patches)" or " [versionCodes: ...]"
-		v_raw=$(sed -e 's/ (.* patch.*//' -e 's/ \[.*//' <<<"$line" | awk '{$1=$1}1')
-		v_clean="${v_raw// /}"
-		v_clean="${v_clean#v}"
-		v_clean="${v_clean#V}"
+	local _tbl tv
+	for _tbl in "$_named" "$_default"; do
+		[ -n "$_tbl" ] || continue
+		while IFS=$'\t' read -r tv _; do
+			[ -z "$tv" ] && continue
+			[ "$tv" = "Any" ] && return 0
+			[ "$tv" = "$ver_clean" ] && return 0
+		done <<<"$_tbl"
+	done
 
-		if [ -n "$v_clean" ] && [ "$v_clean" = "$ver_clean" ]; then
-			return 0
-		fi
-	done <<<"$raw_vers"
+	# No listing at all (the CLI failed or printed nothing): stay permissive, as before -
+	# a tool that cannot answer must not drop a build on its own.
+	if [ "$_default_rc" = 1 ]; then
+		return 0
+	fi
 
 	# Version-unpinned patches (e.g. structural browser hooks) enumerate their
 	# package under Compatible packages but print no version constraint, so
@@ -3182,16 +3433,28 @@ get_cache_repo_resp() {
 		return 0
 	fi
 	local repo tag resp endpoint
-	
+	__CACHE_REPO_MISS__=false
+
 	repo=$(cut -d/ -f4-5 <<<"$url")
 	tag=${url%/}
 	tag=${tag##*/}
 	endpoint="tags/${tag}"
-	
-	if ! resp=$(gh_req "https://api.github.com/repos/${repo}/releases/${endpoint}" -); then
-        return 1
+
+	# Ask for the status code as well, because "this package has never been uploaded"
+	# and "the API call broke" are different news to report: _req runs curl with --fail,
+	# so a 4xx/5xx returns nothing but the appended %{http_code}, and a success carries
+	# the code as the last three bytes after the body.
+	local raw="" call_rc=0 http_code=""
+	raw=$(gh_req "https://api.github.com/repos/${repo}/releases/${endpoint}" - -w '%{http_code}') || call_rc=$?
+	http_code="${raw: -3}"
+	if [[ ! "$http_code" =~ ^[0-9]{3}$ ]]; then http_code=""; fi
+	resp="${raw%"$http_code"}"
+	if [ -n "$http_code" ] && [ "$http_code" != "200" ]; then
+		if [ "$http_code" = "404" ]; then __CACHE_REPO_MISS__=true; fi
+		return 1
 	fi
-	
+	if [ "$call_rc" != 0 ] || [ -z "$resp" ]; then return 1; fi
+
 	# Extract only supported file extensions
 	__CACHE_REPO_RESP__=$(jq -r '.assets[]? | select(.name | test("\\.(apk|apkm|xapk|apks)$")) | .name' <<<"$resp")
 	if [ -z "$__CACHE_REPO_RESP__" ]; then return 1; fi
@@ -4307,6 +4570,11 @@ build_rv() {
 	local final_stock_apk=""
 	local final_all_apk=""
 	local final_version=""
+	# Why the candidate loop produced nothing. The two outcomes are reported very
+	# differently: versions rejected by the patch set never wanted an APK, so telling a
+	# human to upload one is noise; a fetch no source served is exactly that request.
+	local _no_patch_versions=""
+	local _dl_attempted=""
 	
 	for curr_resolved_version in "${all_resolved_versions[@]}"; do
 		resolved_version="$curr_resolved_version"
@@ -4377,7 +4645,14 @@ build_rv() {
 
 				if ! get_${dl_p}_resp "${args[${dl_p}_dlurl]}"; then
 					args[${dl_p}_dlurl]=""
-					epr "ERROR: Could not get response for ${table} in ${dl_p}"
+					if [ "$dl_p" = "cache_repo" ] && [ "${__CACHE_REPO_MISS__:-false}" = true ]; then
+						# Not a failure: the package has never been uploaded to the cache repo,
+						# which is the state of every app's first build. Calling it ERROR made
+						# each of those runs look broken over a normal cache miss.
+						pr "No cached release for '${pkg_name:-$table}' on ${UPLOAD_APKS_REPO} yet; using the live sources."
+					else
+						epr "ERROR: Could not get response for ${table} in ${dl_p}"
+					fi
 					continue
 				fi
 				
@@ -4453,7 +4728,23 @@ build_rv() {
 
 		if ! has_compatible_patches "$cli_jar" "$patches_jar" "$pkg_name" "$version_f" "${args[cli_source]:-}" "${args[included_patches]:-}"; then
 			wpr "No compatible patches found in '${args[patches_src]:-${args[cli_source]:-}}' for '$pkg_name' v${version_f}. Skipping ${table}."
+			_no_patch_versions+=" ${version_f}"
 			continue
+		fi
+
+		# Arch honesty at the candidate level (docs/decisions/0007): a version whose
+		# patch annotation lists other ABIs only has no build for this arch, so its bytes
+		# would be thrown away by the post-download gate after a full fetch. Drop the
+		# candidate now and let the next supported version take its place. Ordered AFTER
+		# the gate on purpose: the gate is a direct call and fills the memo tables this
+		# subshell reads, so no second JVM run per candidate.
+		local _tbl_vc=""
+		if [ "$arch_f" != "all" ] && [ "$arch_f" != "auto" ] && [ "$arch_f" != "universal" ]; then
+			if ! _tbl_vc=$(_candidate_arch_verdict "$version_f" "$arch_f" "${all_resolved_versions[*]}"); then
+				wpr "Version '${version_f}' of '$pkg_name' declares no '${arch_f}' build in '${args[patches_src]:-${args[cli_source]:-}}'. Skipping ${table}."
+				_no_patch_versions+=" ${version_f}"
+				continue
+			fi
 		fi
 
 		# Version, VC and patches-source are final here; anything that aborts from the
@@ -4473,6 +4764,16 @@ build_rv() {
 					local raw_vers
 					if raw_vers=$(patches_list_versions "$cli_jar" "$patches_jar" "$pkg_name" "${args[cli_source]:-}" "$cli_lv_extra"); then
 						target_version_code=$(get_patch_version_code "$raw_vers" "$version" "$arch_f" || true)
+					fi
+					# Same fallback as _cache_target_vc: the effective table still knows the
+					# code when list-versions ignores the patches this build will apply. The
+					# candidate filter above already read it for this arch; reuse that value
+					# instead of starting another pass.
+					if [ -z "$target_version_code" ]; then
+						target_version_code="${_tbl_vc:-}"
+						if [ -z "$target_version_code" ]; then
+							target_version_code=$(_patch_arch_verdict "$version_f" "$arch_f" || true)
+						fi
 					fi
 				fi
 			fi
@@ -4545,6 +4846,7 @@ build_rv() {
 
 				for dl_p in "${DL_SRCS[@]}"; do
 					if [ -z "${args[${dl_p}_dlurl]}" ]; then continue; fi
+					_dl_attempted=1
 					pr "Downloading '${table}' from '${dl_p}'"
 					if ! isoneof $dl_p "${tried_dl[@]}"; then
 						if ! get_${dl_p}_resp "${args[${dl_p}_dlurl]}"; then
@@ -4790,6 +5092,19 @@ build_rv() {
 	version="$final_version"
 	
 	if [ ! -f "$stock_apk" ]; then
+		if [ -z "$_dl_attempted" ] && [ -n "$_no_patch_versions" ]; then
+			# Nothing was fetched: the patch set refused every supported version (or
+			# annotated none for this arch). Reporting this as an exhausted download
+			# asks a human to upload an APK that was never the problem.
+			local _tried_versions
+			_tried_versions=$(printf '%s' "${_no_patch_versions# }" | tr -s ' ' ',')
+			epr "ERROR: No supported version of '${table}' has patches to apply from '${args[patches_src]:-${args[cli_source]:-}}' (tried: ${_tried_versions})."
+			write_no_patches_failure_descriptor "$(failure_slug "$table")" "$table" \
+				"$_tried_versions" \
+				"${resolved_version:-$version_mode}" "$(parse_arch_mapping "${args[version_code]:-}" "${arch_f:-}")" \
+				"${arch_f:-}" "${args[patches_src]:-${args[cli_source]:-}}" "$pkg_name"
+			return 0
+		fi
 		epr "ERROR: Could not download '${table}' after trying all supported versions."
 		# This path used to be silent in the notification. The sources all responded and were
 		# all tried, so it is not the "no valid download source" case above (which does record),

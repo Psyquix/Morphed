@@ -35,21 +35,75 @@ for ((i=1;i<=${#args[@]};i++)); do
 	[ "${args[$((i-1))]}" = "-r" ] && res_of="${args[$i]}"
 done
 
+# The package the CLI was asked about (-f <pkg> for both subcommands) and whether
+# -u/--count-unused-patches was given. com.example.disabled models a real Morphe
+# bundle whose app patches all ship Enabled: false: list-versions (which counts only
+# the patches used by default) says NOTHING about it, while list-patches still prints
+# its versions and per-ABI version codes. That asymmetry is what the effective-patch-
+# set helpers exist to resolve, so the golden can pin it without a JVM.
+pkg_of=""
+count_unused=false
+for ((i=1;i<=${#args[@]};i++)); do
+	prev="${args[$((i-1))]}"
+	[ "$prev" = "-f" ] && pkg_of="${args[$i]}"
+	case "$prev" in -u | --count-unused-patches) count_unused=true ;; esac
+done
+
 case "$sub" in
 list-versions)
-	cat <<'EOF'
+	if [ "$pkg_of" = "com.example.disabled" ]; then
+		if [ "$count_unused" = true ]; then
+			cat <<'EOF'
+INFO: Package name: com.example.disabled
+Most common compatible versions:
+	1.2.3 [versionCodes: ARM64_V8A=3327] (2 patches)
+EOF
+		else
+			echo 'INFO:  '
+		fi
+	else
+		cat <<'EOF'
 1.95.101 (7 patches)
 1.95.100 [versionCodes: arm64-v8a=701951010]
 2.9.6
 EOF
+	fi
 	;;
 list-patches|list)
-	cat <<'EOF'
+	if [ "$pkg_of" = "com.example.disabled" ]; then
+		cat <<'EOF'
+INFO: Index: 2
+Name: House ad only
+Description: Stops the rewarded-ad request; keeps Firebase: off.
+Enabled: false
+Compatible packages:
+	Package name: com.example.disabled
+	Compatible versions:
+		1.2.3
+		1.2.0
+	Version codes:
+		1.2.3: ARM64_V8A=3327
+		1.2.0: ARMEABI_V7A=3204
+
+Index: 3
+Name: Fast startup
+Description: second
+Enabled: false
+Compatible packages:
+	Package name: com.example.disabled
+	Compatible versions:
+		1.2.3
+	Version codes:
+		1.2.3: ARM64_V8A=3327
+EOF
+	else
+		cat <<'EOF'
 INFO: Patch name: Unlock aCalendar+
 Enabled: true
 Version: 2.9.6
 Description: test patch
 EOF
+	fi
 	[ "$sub" = "list" ] && { echo "patch names:"; echo " unlock_developer_options"; echo " remove_ads"; }
 	;;
 patch)
