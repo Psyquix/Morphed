@@ -84,11 +84,14 @@ an identical APK under a new build number falsely notifies every updater
   stability for the other tools is unmeasured), `python3` present, channel
   recognised. Anything missing publishes as today: the check fails toward
   redundancy, never toward a silent drop.
-- **`RVB_DEDUP_MODE`** (`off|log|enforce`, also settable as the `dedup-mode`
-  file-level config key; the pool default comes from the `build.yml` env, which
-  runs **`enforce`** since the 1388-1391 log phase found one true duplicate,
-  zero false matches and no stale state; a config naming nothing falls back to
-  `log`, so local and hand-run builds still only measure). `log` computes and
+- **`RVB_DEDUP_MODE`** (`off|log|enforce`). Precedence: a `dedup-mode` key in
+  the config file being built wins, else the `build.yml` env (the pool default,
+  which runs **`enforce`** since the 1388-1391 log phase found one true
+  duplicate, zero false matches and no stale state), else `log` — so a plain
+  local run with neither named only measures. The env is the *fallback of the
+  config read*; assigning it afterwards would clobber the workflow's choice
+  (exactly the bug that kept every pool in log mode after the flip). The
+  resolved value is logged at start of every build. `log` computes and
   compares but skips nothing and mutates no reference.
 - Records: `temp/unchanged/<slug>.json` per skipped app (same survive-the-sweep
   rule as `temp/failures/`), and `temp/hashes/append.<pid>.tsv` lines per fresh
