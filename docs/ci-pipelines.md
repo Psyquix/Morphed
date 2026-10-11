@@ -137,7 +137,7 @@ Step order, with the reason each is where it is:
 7b. **Report build failures** (`build_report_failures.sh`, `if: always()`,
    `continue-on-error`): reads `temp/failures/`, uploads each build log to
    `xi.pe`, and posts ONE batched Markdown message to the failure topic
-   (`TG_THREAD_NOTIFY`, 3031) — apps that failed to **build** (with the log link
+   (`TG_THREAD_NOTIFY`) — apps that failed to **build** (with the log link
    and patch source) and apps whose **download sources were all exhausted** (a
    request to upload the APK to the cache repo manually), plus a link to the run.
    When it sends, it sets the job output `reported_failures=true`, which
@@ -191,7 +191,11 @@ Step order, with the reason each is where it is:
     `commit_data_branch.sh` then pushes the state file to `data` (only when the
     merge changed it; a failed data push is a warning, not a failure — the next
     run's fetch converges and the worst case is one redundant republish).
-17. `build_notify_telegram.sh` posts the release to the channel's thread.
+17. `build_notify_telegram.sh` posts the release to the channel's thread and to the
+    broadcast channel. `continue-on-error`: the chat, the channel and the topic come
+    from variables only (no built-in handle), so an unset one fails this step — but
+    the step runs last, after publishing, and a notification-config error must not
+    turn a run whose files are already live into a failed build.
 
 ## Cleanup (`cleanup.yml`)
 
@@ -221,7 +225,8 @@ Step order, with the reason each is where it is:
 
 ## Notify (`notify.yml`)
 
-Two delivery models sharing one renderer (`notify_render.sh`):
+Two delivery models sharing one renderer (`notify_render.sh`) and one target guard
+(`notify_targets.sh`):
 
 - **`workflow_call` — immediate.** A caller (`ci.yml`/`manual-ci.yml`) invokes it on
   `failure()`; the `notify` job renders the generic "🔴 CI #N failed" alert via
@@ -240,6 +245,18 @@ Two delivery models sharing one renderer (`notify_render.sh`):
   ONE batched message and prunes exactly the drained prefix. Later queued drains
   find the queue empty and no-op.
 
+**No notification script names a chat.** Every `TG_*` target arrives from a
+repository variable, and `tg_require_targets` refuses to send when one is unset:
+the step fails with an `::error::` listing the missing names and no message goes
+out. It used to be `${TG_CHAT_ID:-@handle}` / `${TG_THREAD_*:-<number>}` defaults at
+each send site, which meant a renamed group or a misspelled variable kept posting to
+the stale chat instead of saying so. A missing topic ID is an error too, not "no
+thread" — in a forum group Telegram routes a threadless message to General, which
+looks like a delivered notification. The guard runs after the `TG_TOKEN` skip (a
+fork with no token still exits 0 quietly) and after each script's own "nothing to
+send" early exit, so a clean run never fails over config nobody needed; a failed
+drain leaves its queue lines on the branch for the next attempt.
+
 The queue is append-only and every plumbing call pins `core.autocrlf=false` /
 `core.eol=lf`, so the JSONL bytes (and the drain's prefix prune) do not depend on
 the runner's git config.
@@ -254,8 +271,8 @@ the runner's git config.
 | secret | `CODEBERG_TOKEN` | watcher | raises Codeberg/Forgejo rate limits |
 | secret | `TG_TOKEN`, `WEBSITE_DISPATCH_TOKEN` (optional) | notify steps | |
 | var | `APKS_REPO`, `WEBSITE_REPO` | build, cleanup | alternate cache/site repos for forks |
-| var | `TG_CHAT_ID`, `TG_CHAT_ID_BROADCAST`, `TG_THREAD_CI`, `TG_THREAD_STABLE`, `TG_THREAD_BETA`, `TG_THREAD_NOTIFY` (3031) | notifications | Telegram topic routing; `TG_THREAD_NOTIFY` receives the per-app build/download failure report |
-| var | `RELEASE_NOTES_TG_LINK`, `RELEASE_NOTES_DONATE_LINK`, `RELEASE_NOTES_WEBSITE_LINK` | build | footer links in the generated release body |
+| var | `TG_CHAT_ID`, `TG_CHAT_ID_BROADCAST`, `TG_THREAD_CI`, `TG_THREAD_STABLE`, `TG_THREAD_BETA`, `TG_THREAD_NOTIFY` | notifications | **all six required** — the chat handle and every topic ID come from here only, and an unset one fails its notify step (see the target guard above) instead of falling back to a written-in chat; `TG_THREAD_NOTIFY` receives the per-app build/download failure report |
+| var | `RELEASE_NOTES_TG_LINK`, `RELEASE_NOTES_DONATE_LINK`, `RELEASE_NOTES_WEBSITE_LINK` | build | footer links in the generated release body; the Group link is omitted when its var is unset, never invented |
 | var | `RVB_MORPHE_PASSTHROUGH` | build | bundle handling escape hatch |
 
 ## Log conventions

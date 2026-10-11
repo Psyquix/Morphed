@@ -1,5 +1,8 @@
 #!/bin/bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=notify_targets.sh
+source "$SCRIPT_DIR/notify_targets.sh"
 NL=$'\n'
 
 if [ -z "${TG_TOKEN:-}" ]; then
@@ -15,6 +18,14 @@ if [ ! -f "$BUILD_FILE" ]; then
   echo "Release notes file (build.md or build.tmp) not found"
   exit 1
 fi
+
+# The group post needs its topic (the chat is a forum - a threadless send would
+# land in General) and the broadcast channel is a second, separate target, so all
+# three are required before anything goes out.
+tg_require_targets \
+  "TG_CHAT_ID=${TG_CHAT_ID:-}" \
+  "TG_THREAD_ID=${TG_THREAD_ID:-}" \
+  "TG_CHAT_ID_BROADCAST=${TG_CHAT_ID_BROADCAST:-}" || exit 1
 
 BODY="$(sed \
   -e 's/&/&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' \
@@ -45,14 +56,14 @@ send_chunk() {
     --data-urlencode "parse_mode=HTML" \
     --data-urlencode "disable_web_page_preview=true" \
     --data-urlencode "text=${text}" \
-    --data-urlencode "chat_id=${TG_CHAT_ID:-@rvb27}" \
-    --data-urlencode "message_thread_id=${TG_THREAD_ID:-}" \
+    --data-urlencode "chat_id=${TG_CHAT_ID}" \
+    --data-urlencode "message_thread_id=${TG_THREAD_ID}" \
     "https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
   curl -s -X POST \
     --data-urlencode "parse_mode=HTML" \
     --data-urlencode "disable_web_page_preview=true" \
     --data-urlencode "text=${text}" \
-    --data-urlencode "chat_id=${TG_CHAT_ID_BROADCAST:-@rvb28}" \
+    --data-urlencode "chat_id=${TG_CHAT_ID_BROADCAST}" \
     "https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
 }
 

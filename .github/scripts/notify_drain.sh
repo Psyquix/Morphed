@@ -15,6 +15,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_queue.sh
 source "$SCRIPT_DIR/notify_queue.sh"
+# shellcheck source=notify_targets.sh
+source "$SCRIPT_DIR/notify_targets.sh"
 
 TG_LIMIT=4096
 NL=$'\n'
@@ -31,6 +33,12 @@ if [ -z "$content" ]; then
 	echo "Notify queue empty; nothing to drain."
 	exit 0
 fi
+
+# Failing here leaves the queue untouched, so the batch is retried by the next
+# drain once the variables are set (see notify_targets.sh for the no-default rule).
+tg_require_targets \
+	"TG_CHAT_ID=${TG_CHAT_ID:-}" \
+	"TG_THREAD_NOTIFY=${TG_THREAD_NOTIFY:-}" || exit 1
 
 # Collect the event texts (one JSON object per line).
 count=0
@@ -63,8 +71,8 @@ send_chunk() {
 		--data-urlencode "parse_mode=Markdown" \
 		--data-urlencode "disable_web_page_preview=true" \
 		--data-urlencode "text=${text}" \
-		--data-urlencode "chat_id=${TG_CHAT_ID:-@rvb27}" \
-		--data-urlencode "message_thread_id=${TG_THREAD_NOTIFY:-3031}" \
+		--data-urlencode "chat_id=${TG_CHAT_ID}" \
+		--data-urlencode "message_thread_id=${TG_THREAD_NOTIFY}" \
 		"https://api.telegram.org/bot${TG_TOKEN}/sendMessage")"
 	# Telegram returns {"ok":false} with HTTP 200 on some errors; check the body.
 	if ! grep -q '"ok":true' <<<"$resp"; then

@@ -22,7 +22,13 @@
 #
 # Env: TG_TOKEN TG_CHAT_ID TG_THREAD_NOTIFY APKS_REPO
 #      GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID GITHUB_OUTPUT
+# TG_CHAT_ID and TG_THREAD_NOTIFY come from repository variables only: with no
+# built-in handle, an unset one fails this step (reported_failures stays unset,
+# so ci.yml still raises its generic alert) rather than posting to a stale chat.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=notify_targets.sh
+source "$SCRIPT_DIR/notify_targets.sh"
 
 NL=$'\n'
 FAILURES_DIR="temp/failures"
@@ -37,6 +43,11 @@ if [ ! -d "$FAILURES_DIR" ] || ! find "$FAILURES_DIR" -maxdepth 1 -name '*.json'
 	echo "No failure records in $FAILURES_DIR; nothing to report."
 	exit 0
 fi
+# Checked after the "nothing to report" exit so a clean build never fails this
+# step over routing config it did not need.
+tg_require_targets \
+	"TG_CHAT_ID=${TG_CHAT_ID:-}" \
+	"TG_THREAD_NOTIFY=${TG_THREAD_NOTIFY:-}" || exit 1
 
 # Markdown (legacy) has no escape-all helper; strip the few characters that
 # would corrupt a [label](url) or a *bold* run in app-authored text.
@@ -201,8 +212,8 @@ send_chunk() {
 		--data-urlencode "parse_mode=Markdown" \
 		--data-urlencode "disable_web_page_preview=true" \
 		--data-urlencode "text=${text}" \
-		--data-urlencode "chat_id=${TG_CHAT_ID:-@rvb27}" \
-		--data-urlencode "message_thread_id=${TG_THREAD_NOTIFY:-3031}" \
+		--data-urlencode "chat_id=${TG_CHAT_ID}" \
+		--data-urlencode "message_thread_id=${TG_THREAD_NOTIFY}" \
 		"https://api.telegram.org/bot${TG_TOKEN}/sendMessage" > /dev/null || true
 }
 

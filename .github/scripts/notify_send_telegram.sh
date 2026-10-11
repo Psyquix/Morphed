@@ -12,6 +12,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_render.sh
 source "$SCRIPT_DIR/notify_render.sh"
+# shellcheck source=notify_targets.sh
+source "$SCRIPT_DIR/notify_targets.sh"
 
 if [ -z "${TG_TOKEN:-}" ]; then
 	echo "TG_TOKEN is not set. Skipping Telegram notification."
@@ -23,6 +25,13 @@ if [ -n "${WF_NAME:-}" ] && [ "${ALREADY_REPORTED:-}" = "true" ]; then
 	echo "Detailed failure report already sent; skipping generic alert."
 	exit 0
 fi
+
+# The target is named by repo variables and nothing else: an unset chat or topic
+# fails this step instead of posting to a handle hardcoded in the workflow (see
+# notify_targets.sh).
+tg_require_targets \
+	"TG_CHAT_ID=${TG_CHAT_ID:-}" \
+	"TG_THREAD_ID=${TG_THREAD_ID:-}" || exit 1
 
 MSG="$(render_message)"
 

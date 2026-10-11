@@ -1,5 +1,8 @@
 #!/bin/bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=notify_targets.sh
+source "$SCRIPT_DIR/notify_targets.sh"
 
 if [ -z "${TG_TOKEN:-}" ]; then
   echo "TG_TOKEN is not set. Skipping Telegram notification."
@@ -43,6 +46,12 @@ if [ -z "$MSG_BODY" ] && [ -z "$APP_UPDATES_MSG" ]; then
   exit 0
 fi
 
+# Required from repo variables only - see notify_targets.sh for why there is no
+# built-in handle or topic here.
+tg_require_targets \
+  "TG_CHAT_ID=${TG_CHAT_ID:-}" \
+  "TG_THREAD_CI=${TG_THREAD_CI:-}" || exit 1
+
 NL=$'\n'
 FULL_MSG=""
 
@@ -74,6 +83,6 @@ curl -s -X POST \
   --data-urlencode "parse_mode=Markdown" \
   --data-urlencode "disable_web_page_preview=true" \
   --data-urlencode "text=${FULL_MSG}" \
-  --data-urlencode "chat_id=${TG_CHAT_ID:-@rvb27}" \
-  --data-urlencode "message_thread_id=${TG_THREAD_CI:-2747}" \
+  --data-urlencode "chat_id=${TG_CHAT_ID}" \
+  --data-urlencode "message_thread_id=${TG_THREAD_CI}" \
   "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" > /dev/null

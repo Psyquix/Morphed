@@ -99,10 +99,15 @@ jobs:
 
       - name: Notify telegram
         if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
+        # continue-on-error because check_patch gates every build job below: a
+        # missing chat handle or topic ID is a notification-config error and must
+        # not fail the job, block build_beta/build_stable on their needs, and stop
+        # a release that the watcher has already decided to trigger.
+        continue-on-error: true
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: "${{ vars.TG_CHAT_ID || '@rvb27' }}"
-          TG_THREAD_CI: "${{ vars.TG_THREAD_CI || '2747' }}"
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_CI: ${{ vars.TG_THREAD_CI }}
           TRIGGER_STABLE: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE }}
           TRIGGER_BETA: ${{ steps.sync_patch_sources.outputs.TRIGGER_BETA }}
           TRIGGER_APP_UPDATE: ${{ steps.compare_apps.outputs.TRIGGER_APP_UPDATE }}

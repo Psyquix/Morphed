@@ -152,7 +152,7 @@ jobs:
           CF_SOLVER_URL: "http://localhost:8000"
           RVB_MORPHE_PASSTHROUGH: "${{ vars.RVB_MORPHE_PASSTHROUGH || 'true' }}"
           RVB_DEDUP_MODE: ${{ env.RVB_DEDUP_MODE }}
-          RELEASE_NOTES_TG_LINK: "${{ vars.RELEASE_NOTES_TG_LINK || 'https://t.me/rvb27' }}"
+          RELEASE_NOTES_TG_LINK: ${{ vars.RELEASE_NOTES_TG_LINK }}
           RELEASE_NOTES_DONATE_LINK: "${{ vars.RELEASE_NOTES_DONATE_LINK || 'https://fahim-ahmed05.github.io/donate' }}"
           RELEASE_NOTES_WEBSITE_LINK: "${{ vars.RELEASE_NOTES_WEBSITE_LINK || 'https://nullcpy.github.io' }}"
         run: |
@@ -165,8 +165,8 @@ jobs:
         continue-on-error: true
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: "${{ vars.TG_CHAT_ID || '@rvb27' }}"
-          TG_THREAD_NOTIFY: "${{ vars.TG_THREAD_NOTIFY || '3031' }}"
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_NOTIFY: ${{ vars.TG_THREAD_NOTIFY }}
           APKS_REPO: "${{ vars.APKS_REPO || 'nullcpy/apks' }}"
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
@@ -309,10 +309,14 @@ jobs:
 
       - name: Notify telegram
         if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
+        # Last step, after everything is published: a missing chat or topic is a
+        # configuration error, so the scripts name no fallback chat and fail loudly
+        # - but they must not mark a run that already released its files as failed.
+        continue-on-error: true
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: "${{ vars.TG_CHAT_ID || '@rvb27' }}"
-          TG_CHAT_ID_BROADCAST: "${{ vars.TG_CHAT_ID_BROADCAST || '@rvb28' }}"
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_CHAT_ID_BROADCAST: ${{ vars.TG_CHAT_ID_BROADCAST }}
           TG_THREAD_ID: ${{ steps.context.outputs.TG_THREAD_ID }}
           TITLE_SUFFIX: ${{ steps.context.outputs.TITLE_SUFFIX }}
           NEXT_VER_CODE: ${{ steps.version.outputs.NEXT_VER_CODE }}

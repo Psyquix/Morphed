@@ -63,8 +63,11 @@ jobs:
     env:
       NOTIFY_DEBOUNCE_SECONDS: "60"
       TG_TOKEN: ${{ secrets.TG_TOKEN }}
-      TG_CHAT_ID: "${{ vars.TG_CHAT_ID || '@rvb27' }}"
-      TG_THREAD_NOTIFY: "${{ vars.TG_THREAD_NOTIFY || '3031' }}"
+      # No fallback chat or topic: an unset variable fails this job instead of
+      # silently batching issue/PR alerts into a stale chat. The queue keeps its
+      # lines, so the next drain retries once the variables exist.
+      TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+      TG_THREAD_NOTIFY: ${{ vars.TG_THREAD_NOTIFY }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -89,8 +92,8 @@ jobs:
       - name: Send failure alert to Telegram
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: "${{ vars.TG_CHAT_ID || '@rvb27' }}"
-          TG_THREAD_ID: "${{ vars.TG_THREAD_NOTIFY || '3031' }}"
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_ID: ${{ vars.TG_THREAD_NOTIFY }}
           WF_NAME: ${{ inputs.workflow_name }}
           ALREADY_REPORTED: ${{ inputs.already_reported }}
           ACTOR: ${{ github.actor }}
