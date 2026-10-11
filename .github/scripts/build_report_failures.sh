@@ -8,9 +8,14 @@
 # this step owns the whole report and is fail-soft like every other notify path,
 # so one bad xi.pe upload never fails the build step.
 #
-# Records (written by scripts/utils.sh + scripts/build.sh):
+# Records (written by scripts/utils.sh + scripts/build.sh), one per app+arch:
 #   <slug>.json    a build that aborted (has <slug>.log alongside)
 #   <slug>_dl.json a build whose download sources were all exhausted
+# Records are regrouped by app base name and rendered in two parts: a Build
+# Failed section (per-arch versionCode + the log link) and a Download Failures
+# section (per-arch versionCode + search-engine links for the APK). Each arch
+# carries its own version so an app that resolved a different version per arch
+# never renders a wrong shared version.
 #
 # Route B: when this step actually sends, it writes reported_failures=true so
 # ci.yml can skip the generic "🔴 CI #N failed" alert for the same run.
@@ -45,9 +50,23 @@ version_label() { # $1=version — hide the unhelpful placeholder values
 	esac
 }
 
-# ---- Collect build failures (upload each log first) ----
-build_lines=""
-build_count=0
+# app_base <app-label> <arch> — the app name with the engine's " (<arch>)" build
+# suffix removed, so per-arch records regroup under one name. Only the exact
+# " (<arch>)" suffix is stripped, so a legitimate table name like "YouTube
+# (Experimental)" keeps its parenthetical.
+app_base() {
+	local app=$1 arch=$2
+	[ -n "$arch" ] && app="${app% ($arch)}"
+	printf '%s' "$app"
+}
+
+# uniq_col <n> <blob> — first-seen unique values of pipe-column n, empties dropped.
+uniq_col() { printf '%s\n' "$2" | cut -d'|' -f"$1" | sed '/^$/d' | awk '!s[$0]++'; }
+
+# ---- Collect records, grouped by app base name (ordered by first sighting) ----
+# Per record the blob is:  arch | version | versionCode | logurl | patches | pkg
+declare -A BREC DREC BORDERSET DORDERSET
+BORDER=""; DORDER=""
 shopt -s nullglob
 for json in "$FAILURES_DIR"/*.json; do
 	case "$json" in *_dl.json) continue ;; esac
@@ -57,65 +76,117 @@ for json in "$FAILURES_DIR"/*.json; do
 	[ -f "$FAILURES_DIR/${slug}_dl.json" ] && rm -f "$FAILURES_DIR/${slug}_dl.json"
 
 	app="$(jq -r '.app // empty' "$json")"
+	arch="$(jq -r '.arch // empty' "$json")"
 	ver="$(version_label "$(jq -r '.version // empty' "$json")")"
 	vc="$(jq -r '.vc // empty' "$json")"
 	patches="$(jq -r '.patches_src // empty' "$json")"
 
-	entry="📱 $(md_clean "$app")${ver:+ $ver}"
-	[ -n "$vc" ] && entry+="${NL}  ╰ VC: $vc"
-	# Upload the log; a non-URL response is treated as failure (no link, not a
-	# dropped message) so the app is still listed.
+	# Upload the log; a non-URL response means no link (the app is still listed).
+	logurl=""
 	if [ -f "$FAILURES_DIR/$slug.log" ]; then
 		link="$(curl -sS --data-binary "@$FAILURES_DIR/$slug.log" "$XIPE_URL_BASE/" 2> /dev/null || true)"
-		case "$link" in
-		"$XIPE_URL_BASE/"*) entry+="${NL}  ╰ [Log]($link)" ;;
-		esac
+		case "$link" in "$XIPE_URL_BASE/"*) logurl="$link" ;; esac
 	fi
-	# patches_src is owner/repo; assume a GitHub host (the report is a pointer,
-	# the log carries the real source host).
-	[ -n "$patches" ] && entry+="${NL}  ╰ Patches: [$(md_clean "$patches")](https://github.com/$patches)"
 
-	build_lines+="${entry}${NL}${NL}"
-	build_count=$((build_count + 1))
+	base="$(app_base "$app" "$arch")"
+	BREC[$base]+="${arch}|${ver}|${vc}|${logurl}|${patches}|${NL}"
+	[ -z "${BORDERSET[$base]:-}" ] && { BORDER+="${base}${NL}"; BORDERSET[$base]=1; }
 done
 
-# ---- Collect download failures (no log upload; the point is a manual upload) ----
-dl_lines=""
-dl_count=0
 for json in "$FAILURES_DIR"/*_dl.json; do
 	app="$(jq -r '.app // empty' "$json")"
+	arch="$(jq -r '.arch // empty' "$json")"
 	ver="$(version_label "$(jq -r '.version // empty' "$json")")"
 	vc="$(jq -r '.vc // empty' "$json")"
-
-	entry="📱 $(md_clean "$app")${ver:+ $ver}"
-	[ -n "$vc" ] && entry+="${NL}  ╰ VC: $vc"
-	dl_lines+="${entry}${NL}${NL}"
-	dl_count=$((dl_count + 1))
+	pkg="$(jq -r '.pkg // empty' "$json")"
+	base="$(app_base "$app" "$arch")"
+	# No log and no patches for a download failure; blob must still be 6 fields
+	# (arch|ver|vc|log|patches|pkg) so the reader's columns line up.
+	DREC[$base]+="${arch}|${ver}|${vc}|||${pkg}${NL}"
+	[ -z "${DORDERSET[$base]:-}" ] && { DORDER+="${base}${NL}"; DORDERSET[$base]=1; }
 done
 shopt -u nullglob
 
-if [ "$build_count" = 0 ] && [ "$dl_count" = 0 ]; then
-	echo "Failure records present but none parsed; nothing to report."
+# arch_token <ver> <vc> — the `v<version> (<versionCode>)` code span for one arch
+# line, collapsing to whatever pieces are actually known.
+arch_token() { # $1=ver $2=vc
+	local ver=$1 vc=$2
+	[ -z "$ver" ] && { [ -n "$vc" ] && printf '(%s)' "$vc"; return 0; }
+	printf '`%s%s`' "$ver" "${vc:+ ($vc)}"
+}
+
+# search_links <pkg> <base> <ver> — three engine links to locate the missing APK.
+search_links() { # $1=pkg $2=base $3=ver(label, maybe 'vX')
+	local enc q
+	q="${1:-$2}${3:+ ${3#v}} android apk"
+	enc="$(jq -rn --arg q "$q" '$q|@uri')"
+	printf '[Search Google](https://www.google.com/search?q=%s) / [DuckDuckGo](https://duckduckgo.com/?q=%s) / [Brave](https://search.brave.com/search?q=%s)' "$enc" "$enc" "$enc"
+}
+
+# render_app_group <base> <blob> <mode build|dl> — one grouped app block. Both
+# modes list each arch as "arch `vX (vc)`: <link>"; build links the log, download
+# links the search engines. Build adds a Patches line naming the failing bundle.
+render_app_group() { # $1=base $2=blob $3=mode
+	local base=$1 blob=$2 mode=$3 out arch ver vc log patches pkg tok links
+	out="📱 $(md_clean "$base")"
+	if [ "$mode" = build ]; then
+		patches=$(uniq_col 5 "$blob" | head -1)
+		[ -n "$patches" ] && out+="${NL}  ╰ Patches: [$(md_clean "$patches")](https://github.com/$patches)"
+	fi
+	while IFS='|' read -r arch ver vc log patches pkg; do
+		[ -z "$arch" ] && continue
+		tok="$(arch_token "$ver" "$vc")"
+		if [ "$mode" = build ]; then
+			[ -z "$log" ] && { out+="${NL}  ╰ ${arch}${tok:+ ${tok}}"; continue; }
+			links="[Log](${log})"
+		else
+			links="$(search_links "$pkg" "$base" "$ver")"
+		fi
+		out+="${NL}  ╰ ${arch}${tok:+ ${tok}}: ${links}"
+	done <<< "$blob"
+	printf '%s' "$out"
+}
+
+# ---- Assemble the two parts ----
+# Render each app block first and count only the ones that produce output, so a
+# part never prints its "(N apps)" header over an empty body.
+build_body=""; dl_body=""; cbuild=0; cdl=0
+while IFS= read -r base; do
+	[ -z "$base" ] && continue
+	blk="$(render_app_group "$base" "${BREC[$base]}" build)"
+	[ -z "${blk//[[:space:]]/}" ] && continue
+	build_body+="${blk}${NL}${NL}"; cbuild=$((cbuild + 1))
+done <<< "$BORDER"
+while IFS= read -r base; do
+	[ -z "$base" ] && continue
+	blk="$(render_app_group "$base" "${DREC[$base]}" dl)"
+	[ -z "${blk//[[:space:]]/}" ] && continue
+	dl_body+="${blk}${NL}${NL}"; cdl=$((cdl + 1))
+done <<< "$DORDER"
+
+if [ "$cbuild" = 0 ] && [ "$cdl" = 0 ]; then
+	echo "Failure records present but nothing renderable; no report sent."
 	exit 0
 fi
 
-# ---- Assemble: section headers, actionable hints, run link ----
 MSG=""
-if [ "$build_count" -gt 0 ]; then
-	MSG+="*🚨 Build Failures ($build_count app$([ "$build_count" = 1 ] && echo '' || echo 's'))*${NL}${NL}${build_lines}"
+if [ "$cbuild" -gt 0 ]; then
+	MSG+="*🚨 Build Failed (${cbuild} app$([ "$cbuild" = 1 ] && echo '' || echo 's'))*${NL}${NL}${build_body}"
 fi
-if [ "$dl_count" -gt 0 ]; then
+if [ "$cdl" -gt 0 ]; then
 	[ -n "$MSG" ] && MSG+="${NL}"
-	MSG+="*📡 Download Failures ($dl_count app$([ "$dl_count" = 1 ] && echo '' || echo 's'))*${NL}${NL}${dl_lines}"
+	MSG+="*📡 Download Failures (${cdl} app$([ "$cdl" = 1 ] && echo '' || echo 's'))*${NL}${NL}${dl_body}"
 fi
 
-HINTS=""
-[ "$build_count" -gt 0 ] && HINTS+="⚠️ _Build failures:_ report the issue to the patch author with the log link."
-if [ "$dl_count" -gt 0 ]; then
-	[ -n "$HINTS" ] && HINTS+="${NL}"
-	HINTS+="📦 _Download failures:_ upload the APK to the [cache repo](https://github.com/${APKS_REPO:-nullcpy/apks}) manually."
+# Trim trailing blank lines before the hints / run link.
+while [ "${MSG%$'\n'}" != "$MSG" ]; do MSG="${MSG%$'\n'}"; done
+
+if [ "$cbuild" -gt 0 ]; then
+	MSG+="${NL}${NL}⚠️ Report the issue to the patch author with the log link."
 fi
-[ -n "$HINTS" ] && MSG+="${NL}${HINTS}"
+if [ "$cdl" -gt 0 ]; then
+	MSG+="${NL}${NL}ℹ️ Upload the APK to the [cache repo](https://github.com/${APKS_REPO:-nullcpy/apks}) manually."
+fi
 
 if [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
 	run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
