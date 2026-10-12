@@ -48,7 +48,7 @@ Thank you to everyone who helps keep this project alive!
 >
 > All APKs and modules in this repository are 100% automated. If you need help, please direct your feedback to the right place:
 >
-> 👥 **Chat Groups** — [Telegram](https://t.me/open_sauce) · [WhatsApp](https://chat.whatsapp.com/JF5lDymMxB4BpuEN77w54y) · [Signal](https://signal.group/#CjQKILNEmjszgWGXNBiZwTtdOTJikU534DIR90NZAoCePX6fEhBsFkkMyq5a4m2E6iSZqt5O): join whichever group you feel most comfortable with — every one is monitored and is a valid place to report issues, get help, or request new apps.
+> 👥 **Chat Groups:** [Telegram](https://t.me/open_sauce) · [WhatsApp](https://chat.whatsapp.com/JF5lDymMxB4BpuEN77w54y) · [Signal](https://signal.group/#CjQKILNEmjszgWGXNBiZwTtdOTJikU534DIR90NZAoCePX6fEhBsFkkMyq5a4m2E6iSZqt5O). Join whichever group you feel most comfortable with; every one is monitored and is a valid place to report issues, get help, or request new apps.
 >
 > - 🧩 **Patch Issues:** If a specific feature/mod is broken (e.g., ads are showing), please open an issue in the **respective patch developer's repository**.
 > - 🛠️ **Builder Issues:** If an app fails to build, or the download links are broken, **[open an Issue here on GitHub](https://github.com/nullcpy/rvb/issues/new/choose)** or message in any of the **chat groups** above.
