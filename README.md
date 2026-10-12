@@ -9,8 +9,6 @@ Automatically builds and publishes APKs & Magisk/KernelSU Modules whenever new p
 - 🌐 [Download Website](https://nullcpy.github.io/)
 - 💬 [Telegram Group](https://t.me/open_sauce)
 - 📣 [Telegram Channel](https://t.me/s/nullstore_updates)
-- 🟢 [WhatsApp Group](https://chat.whatsapp.com/JF5lDymMxB4BpuEN77w54y)
-- 📡 [Signal Group](https://signal.group/#CjQKILNEmjszgWGXNBiZwTtdOTJikU534DIR90NZAoCePX6fEhBsFkkMyq5a4m2E6iSZqt5O)
 - ❤️ [Donate](https://fahim-ahmed05.github.io/donate)
 - 🐞 [Report an Issue](https://github.com/nullcpy/rvb/issues/new/choose)
 
@@ -48,11 +46,11 @@ Thank you to everyone who helps keep this project alive!
 >
 > All APKs and modules in this repository are 100% automated. If you need help, please direct your feedback to the right place:
 >
-> 👥 **Chat Groups:** [Telegram](https://t.me/open_sauce) · [WhatsApp](https://chat.whatsapp.com/JF5lDymMxB4BpuEN77w54y) · [Signal](https://signal.group/#CjQKILNEmjszgWGXNBiZwTtdOTJikU534DIR90NZAoCePX6fEhBsFkkMyq5a4m2E6iSZqt5O). Join whichever group you feel most comfortable with; every one is monitored and is a valid place to report issues, get help, or request new apps.
+> 👥 **Chat Group:** [Telegram](https://t.me/open_sauce). It is monitored and is a valid place to report issues, get help, or request new apps.
 >
 > - 🧩 **Patch Issues:** If a specific feature/mod is broken (e.g., ads are showing), please open an issue in the **respective patch developer's repository**.
-> - 🛠️ **Builder Issues:** If an app fails to build, or the download links are broken, **[open an Issue here on GitHub](https://github.com/nullcpy/rvb/issues/new/choose)** or message in any of the **chat groups** above.
-> - 💬 **General Help & Requests:** Need help installing, or want to request a new app? Ask in any of the **chat groups** above, or **[open an Issue here on GitHub](https://github.com/nullcpy/rvb/issues/new/choose)** / **[start a Discussion](https://github.com/nullcpy/rvb/discussions/new?category=general)**.
+> - 🛠️ **Builder Issues:** If an app fails to build, or the download links are broken, **[open an Issue here on GitHub](https://github.com/nullcpy/rvb/issues/new/choose)** or message in our **Telegram group** above.
+> - 💬 **General Help & Requests:** Need help installing, or want to request a new app? Ask in our **Telegram group** above, or **[open an Issue here on GitHub](https://github.com/nullcpy/rvb/issues/new/choose)** / **[start a Discussion](https://github.com/nullcpy/rvb/discussions/new?category=general)**.
 
 ## 📚 Documentation
 
