@@ -7,7 +7,7 @@ Automatically builds and publishes APKs & Magisk/KernelSU Modules whenever new p
 ## 🔗 Links
 
 - 🌐 [Download Website](https://nullcpy.github.io/)
-- 💬 [Telegram Group](https://t.me/open_sauce)
+- 💬 [Telegram Group](https://t.me/nullstoretg)
 - 📣 [Telegram Channel](https://t.me/s/nullstore_updates)
 - ❤️ [Donate](https://fahim-ahmed05.github.io/donate)
 - 🐞 [Report an Issue](https://github.com/nullcpy/rvb/issues/new/choose)
@@ -46,7 +46,7 @@ Thank you to everyone who helps keep this project alive!
 >
 > All APKs and modules in this repository are 100% automated. If you need help, please direct your feedback to the right place:
 >
-> 👥 **Chat Group:** [Telegram](https://t.me/open_sauce). It is monitored and is a valid place to report issues, get help, or request new apps.
+> 👥 **Chat Group:** [Telegram](https://t.me/nullstoretg). It is monitored and is a valid place to report issues, get help, or request new apps.
 >
 > - 🧩 **Patch Issues:** If a specific feature/mod is broken (e.g., ads are showing), please open an issue in the **respective patch developer's repository**.
 > - 🛠️ **Builder Issues:** If an app fails to build, or the download links are broken, **[open an Issue here on GitHub](https://github.com/nullcpy/rvb/issues/new/choose)** or message in our **Telegram group** above.
