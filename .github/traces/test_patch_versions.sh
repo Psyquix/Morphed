@@ -158,7 +158,9 @@ got=$(_effective_patch_versions cli.jar bundle.mpp com.ninegag.android.app "$SRC
 LV_BLOB=$'1.95.100 [versionCodes: ARM64_V8A=701951010, ARMEABI_V7A=701951010] (3 patches)\n1.95.101 (7 patches)\n'
 reset_cache
 got=$(_effective_patch_versions cli.jar bundle.mpp com.example "$SRC" default) || fail "codes parse (rc=$?)"
-[[ "$(head -1 <<<"$got")" == $'1.95.100\tARM64_V8A=701951010, ARMEABI_V7A=701951010' ]] ||
+# The comma separators the CLI prints are normalized away: the second column is a
+# space separated token list, and a code carrying punctuation would become the pin.
+[[ "$(head -1 <<<"$got")" == $'1.95.100\tARM64_V8A=701951010 ARMEABI_V7A=701951010' ]] ||
 	fail "default table codes: got [$got]"
 
 # list-versions printing only a header line is the real OfflineGames shape: it
@@ -200,6 +202,56 @@ has_compatible_patches cli.jar bundle.mpp "$PKG" 1.2.3 "$SRC" "" ||
 reset_cache
 has_compatible_patches cli.jar bundle.mpp "$PKG" 1.2.3 "$SRC" "'Fast Offline Games startup'" ||
 	fail "a failing listing must stay permissive even when names are configured"
+
+# --------------------------------------------------------- names with whitespace
+# Venus-Patches prints its Discord version as "348.10 - Stable" while the engine's
+# version_f (and every cache filename) has the spaces removed. The table is keyed in
+# that canonical form, so both sides still match - and its version codes are a COMMA
+# separated list, which must not leak a trailing comma into a pinned versionCode.
+LP_BLOB=$(printf '%s\n' \
+	'INFO: Index: 0' \
+	'Name: Read All' \
+	'Enabled: true' \
+	'Compatible packages:' \
+	'	Package name: com.discord' \
+	'	Compatible versions:' \
+	'		348.10 - Stable' \
+	'	Version codes:' \
+	'		348.10 - Stable: ARM64_V8A=348010, ARMEABI_V7A=348010, X86_64=348010, X86=348010')
+# restore the listing stubs (the permissive-gate case above broke them)
+patches_list() { printf '%s\n' "$LP_BLOB"; }
+patches_list_versions() { printf '%s\n' "$LV_BLOB"; }
+# scope _patch_arch_verdict reads the way build_rv has it
+cli_jar=cli.jar
+patches_jar=bundle.mpp
+pkg_name=com.discord
+declare -A args=([included_patches]="'Read All'" [cli_source]="$SRC")
+reset_cache
+got=$(_effective_patch_versions cli.jar bundle.mpp com.discord "$SRC" named "'Read All'") ||
+	fail "spaced-version named table (rc=$?)"
+[[ "$got" == $'348.10-Stable\tARM64_V8A=348010 ARMEABI_V7A=348010 X86_64=348010 X86=348010' ]] ||
+	fail "spaced version / comma codes table: got [$got]"
+# The gate is handed build_rv's space-stripped version_f; a caller that kept the raw
+# name must land in the same place.
+reset_cache
+has_compatible_patches cli.jar bundle.mpp com.discord "348.10-Stable" "$SRC" "'Read All'" ||
+	fail "gate lost a spaced-version match (stripped target)"
+LV_BLOB=$'INFO: Package name: com.discord\nMost common compatible versions:\n\t348.10 - Stable [versionCodes: ARM64_V8A=348010, ARMEABI_V7A=348010] (26 patches)\n'
+reset_cache
+has_compatible_patches cli.jar bundle.mpp com.discord "348.10 - Stable" "$SRC" "" ||
+	fail "gate lost a spaced-version match (default table, raw target)"
+# Every annotated ABI is seen, so no arch is refused and the pin is a bare number.
+for a in arm64-v8a arm-v7a x86_64 x86; do
+	reset_cache
+	vc=$(_patch_arch_verdict "348.10-Stable" "$a") || fail "348.10 must declare $a too"
+	[[ "$vc" == "348010" ]] || fail "348.10/$a pin must be 348010, got [$vc]"
+done
+reset_cache
+if _patch_arch_verdict "348.10-Stable" mips > /dev/null 2>&1; then
+	: # unmapped arch token: never filtered (there is nothing to compare)
+else
+	fail "an unmapped arch must not be refused by an annotation"
+fi
 
 # ---------------------------------------------------------------- _table_has_version
 _table_has_version "$table" 1.2.3 || fail "table lookup missed a declared version"

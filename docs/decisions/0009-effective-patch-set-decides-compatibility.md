@@ -97,6 +97,13 @@ from the patch set that will actually be applied**, in one function:
 - A build that names patches now reads `list-patches` for the gate as well as for
   resolution: one extra CLI listing per app+arch (memoized after that), paid to stop
   the advertised-and-rejected loop. Apps that name nothing are unchanged.
+- A table version is keyed through `_ver_key` (whitespace removed, one leading `v/V`
+  dropped), which is the form `version_f` and every cache filename already use.
+  Bundle-authored version names are free text — Venus-Patches calls its Discord build
+  `348.10 - Stable` — and comparing that raw against the stripped value skips every
+  supported version of such an app. The same free text also lists version codes
+  comma-separated (`ARM64_V8A=348010, ARMEABI_V7A=348010`), so the annotation is split
+  on commas and a code that is not a bare number is never used as a pin.
 - The `tried` list in `_np.json` is a wire addition; `build_report_failures.sh`
   reads it and nothing else does.
 

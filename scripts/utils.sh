@@ -1316,6 +1316,13 @@ _patches_list() {
 	echo "$op"
 }
 
+# The engine's canonical form of a version string. Bundles print names like
+# "348.10 - Stable", while build_rv's version_f (and every cache filename) has its
+# spaces removed, so the two sides of every comparison have to be folded the same way:
+# strip whitespace, then one leading v/V. This is the shape the pre-table gate used
+# with ${version// /} and ${v_raw// /}.
+_ver_key() { local v=${1// /}; v="${v#v}"; v="${v#V}"; printf '%s' "$v"; }
+
 # Map a build arch onto the ABI token a patch bundle uses in its version-code
 # annotation ("[versionCodes: ARM64_V8A=3327]" / "3.15.3: ARM64_V8A=3327"). The one
 # mapping for the whole engine: get_patch_version_code, the candidate verdict and the
@@ -1349,7 +1356,9 @@ _abi_token_of_arch() { # $1=build arch
 #   mode "default" -> the patches the CLI itself counts, read out of list-versions
 # stdout: "<version>\t<ABI=vc[ ABI=vc]>" - one occurrence per declaring patch, so a
 #   caller can rank versions by how many patches support them; "Any\t" for a patch
-#   that puts no version constraint. Leading "v" is stripped, tokens are as printed.
+#   that puts no version constraint. The version column is a _ver_key, and commas in
+#   the annotation are normalized to spaces (Venus prints "ARM64_V8A=348010, ...") -
+#   a caller comparing against anything else compares a different string.
 # rc: 0 table | 1 no listing (CLI failed / printed nothing: caller stays permissive)
 #     2 the CLI answered but declares no version (caller runs its own logic)
 _effective_patch_versions() {
@@ -1406,10 +1415,11 @@ _effective_patch_versions() {
 			t ~ /^(Enabled|Description|Options|Requires|Version|Compatible packages|Min version|UUID|Author|Package name):/ { sect = ""; next }
 			!active { next }
 			sect == "ver" && t == "Any" { anyv = 1; next }
-			sect == "ver" && t ~ /^[vV]?[0-9]/ { sub(/^[vV]/, "", t); nv++; vers[nv] = t; next }
+			sect == "ver" && t ~ /^[vV]?[0-9]/ { gsub(/[ \t]/, "", t); sub(/^[vV]/, "", t); nv++; vers[nv] = t; next }
 			sect == "vc" && t ~ /^[vV]?[0-9][^:]*: .*=/ {
 				p = index(t, ":"); v = substr(t, 1, p - 1); r = substr(t, p + 1)
-				sub(/^[vV]/, "", v); gsub(/[ \t]+/, " ", r); sub(/^ /, "", r); sub(/ $/, "", r)
+				gsub(/[ \t]/, "", v); sub(/^[vV]/, "", v)
+				gsub(/,/, " ", r); gsub(/[ \t]+/, " ", r); sub(/^ /, "", r); sub(/ $/, "", r)
 				found = 0
 				for (i = 1; i <= nv; i++) if (vers[i] == v) { found = 1; break }
 				if (!found) { nv++; vers[nv] = v }
@@ -1436,10 +1446,10 @@ _effective_patch_versions() {
 				abis = ""; q = index(t, "[versionCodes:")
 				if (q) {
 					r = substr(t, q + 14)
-					if (sub(/\].*/, "", r)) { gsub(/[ \t]+/, " ", r); sub(/^ /, "", r); sub(/ $/, "", r); abis = r }
+					if (sub(/\].*/, "", r)) { gsub(/,/, " ", r); gsub(/[ \t]+/, " ", r); sub(/^ /, "", r); sub(/ $/, "", r); abis = r }
 				}
 				v = substr(t, 1, q ? q - 1 : length(t))
-				sub(/ \(.*$/, "", v); v = trimv(v); sub(/^[vV]/, "", v)
+				sub(/ \(.*$/, "", v); v = trimv(v); gsub(/[ \t]/, "", v); sub(/^[vV]/, "", v)
 				if (v == "") next
 				printf "%s\t%s\n", v, abis
 			}' <<<"$listing")
@@ -1461,8 +1471,8 @@ _effective_patch_versions() {
 # stdout: the versionCode when the table pins exactly one for this arch
 # rc: 0 buildable (pinned, or not annotated at all) | 1 annotated without this arch
 _effective_arch_verdict() {
-	local tab=$1 ver=$2 arch=$3 abi
-	ver="${ver#v}"; ver="${ver#V}"
+	local tab=$1 ver arch=$3 abi
+	ver=$(_ver_key "$2")
 	abi=$(_abi_token_of_arch "$arch")
 	# all / auto / an unmapped arch: nothing to filter or pin on.
 	[ -z "$abi" ] && return 0
@@ -1477,9 +1487,14 @@ _effective_arch_verdict() {
 			n = split($2, tok, " ")
 			for (i = 1; i <= n; i++) {
 				if (tok[i] == "") continue
-				p = index(tok[i], "=")
+				# Strip any leftover list punctuation and take only a numeric code: a
+				# versionCode is a claim the cache filename and the post-download check go
+				# on making, so a value that is not a bare number is not a pin at all.
+				t = tok[i]; sub(/[,;]+$/, "", t)
+				p = index(t, "=")
 				if (p < 2) continue
-				k = canon(substr(tok[i], 1, p - 1)); val = substr(tok[i], p + 1)
+				k = canon(substr(t, 1, p - 1)); val = substr(t, p + 1)
+				if (val !~ /^[0-9]+$/) continue
 				seen[k] = 1
 				if (k in code) { if (code[k] != val) code[k] = "@amb" } else code[k] = val
 			}
@@ -1501,8 +1516,8 @@ _table_has_version() { awk -F'\t' -v ver="$2" '$1 == ver { found = 1 } END { exi
 # know the version, otherwise the default set does. Echoes a versionCode or nothing;
 # rc 1 means the version is annotated for other ABIs only (skip the candidate).
 _patch_arch_verdict() { # $1=version $2=arch  (reads build_rv scope: cli_jar, patches_jar, pkg_name, args)
-	local tab v="${1#v}"
-	v="${v#V}"
+	local tab v
+	v=$(_ver_key "$1")
 	if [ -n "${args[included_patches]:-}" ]; then
 		tab=$(_effective_patch_versions "$cli_jar" "$patches_jar" "$pkg_name" "${args[cli_source]:-}" named "${args[included_patches]}") || tab=""
 		if [ -n "$tab" ] && _table_has_version "$tab" "$v"; then
@@ -1524,13 +1539,14 @@ _patch_arch_verdict() { # $1=version $2=arch  (reads build_rv scope: cli_jar, pa
 # is only allowed to REDIRECT: when no candidate mentions the arch the download
 # proceeds and _artifact_satisfies_arch judges the bytes (docs/decisions/0009).
 _candidate_arch_verdict() {
-	local vc="" cand v="${1#v}"
+	local vc="" cand v
+	v=$(_ver_key "$1")
 	if vc=$(_patch_arch_verdict "$1" "$2"); then
 		printf '%s' "$vc"
 		return 0
 	fi
 	for cand in $3; do
-		cand="${cand#v}"
+		cand=$(_ver_key "$cand")
 		if [ -z "$cand" ] || [ "$cand" = "$v" ]; then continue; fi
 		if _patch_arch_verdict "$cand" "$2" > /dev/null 2>&1; then
 			return 1
@@ -1549,9 +1565,8 @@ has_compatible_patches() {
 	fi
 	[ -z "$cli_jar" ] || [ -z "$patches_jar" ] || [ -z "$pkg_name" ] || [ -z "$version" ] && return 0
 
-	local ver_clean="${version// /}"
-	ver_clean="${ver_clean#v}"
-	ver_clean="${ver_clean#V}"
+	local ver_clean
+	ver_clean=$(_ver_key "$version")
 
 	# Pinned scan over the patch set that will actually be applied: the included-patches
 	# names when configured (those reach the CLI as -e and apply whatever the bundle
