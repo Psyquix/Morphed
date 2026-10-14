@@ -39,7 +39,8 @@ def main():
             build_info = json.load(f)
 
     build_dir = Path("build")
-    built_files = [f for f in build_dir.iterdir() if f.is_file()] if build_dir.exists() else []
+    built_files = [f for f in build_dir.iterdir() if f.is_file()
+                   ] if build_dir.exists() else []
 
     files = {}
     for target_key, info in build_info.items():
@@ -59,10 +60,12 @@ def main():
         if brand_cfg:
             brand_key, brand_name = normalize_key(brand_cfg), brand_cfg
         else:
-            brand_key, brand_name = parse_patch_info(info.get("patches_source"), info.get("patches"))
+            brand_key, brand_name = parse_patch_info(
+                info.get("patches_source"), info.get("patches"))
 
         variant_cfg = (info.get("variant") or "").strip()
-        variant_val = variant_cfg if (variant_cfg and variant_cfg.lower() != "default") else None
+        variant_val = variant_cfg if (
+            variant_cfg and variant_cfg.lower() != "default") else None
         sub_variant_cfg = (info.get("sub_variant") or "").strip()
         sub_variant_val = sub_variant_cfg if sub_variant_cfg else None
         version = info.get("version", "")
@@ -133,7 +136,8 @@ def main():
     out_path = out_dir / "build.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, separators=(",", ":"))
-    print(f"Wrote {out_path} with {len(files)} file entries (build {next_ver_code}, channel {channel}).")
+    print(
+        f"Wrote {out_path} with {len(files)} file entries (build {next_ver_code}, channel {channel}).")
 
 
 if __name__ == "__main__":
