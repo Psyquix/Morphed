@@ -245,7 +245,7 @@ in; the first source that yields a verified artifact **carrying the requested ar
 | 2 | `direct` | a straight file URL in the config |
 | 3 | `github` | release assets, filtered by `github-release-regex` / `github-regex`, arch-mapped |
 | 4 | `archive` | `archive.org` item, the long-term fallback for delisted versions |
-| 5 | `apkmirror` | universal-bundle strategy; package/version read from the HTML |
+| 5 | `apkmirror` | variant picker ranks the release's rows (see below); package/version read from the HTML |
 | 6 | `uptodown` | |
 | 7 | `apkpure` | one link per ABI read off `/downloading/<v>` → `/download/<v>` → `/download`, the page's featured `#download_link` being only one candidate, with the store's own `?versionCode=&nc=` link form as the last resort when a page yields nothing; XAPK handling in `_apkpure_install_xapk` |
 | 8 | `apkcombo` | trusts the served filename over its object key |
@@ -277,6 +277,22 @@ Supporting machinery:
   `nc` and to serve nothing for an unknown `nc`). It is used only when the engine has
   already resolved a version code and the arch has a store spelling, it is logged as
   constructed, and the artifact is judged from its bytes like any other.
+- **APKMirror variant picking** — one release page lists several uploads of the *same*
+  versionCode that differ only in their Architecture / Minimum Version / Screen DPI
+  columns, so the row matcher (`scripts/apkmirror_search.py`, mirrored in `utils.sh` for
+  a runner without python) treats each column as a predicate and then ranks what is left:
+  the **lowest Minimum Version** first, so the published artifact installs on the oldest
+  device the app still supports instead of on whichever row sits at the table's bottom;
+  wider ABI coverage next (one fetch then serves both arm builds); an exact DPI match
+  next; table position last. A pinned versionCode narrows the rows and does not end the
+  search — answering the first numeric match is what handed the arm-v7a build the
+  arm64-only bundle in run 38589077939. A multi-ABI column is read by membership, so
+  `arm64-v8a + armeabi-v7a + x86 + x86_64` counts as carrying arm-v7a, while a catch-all
+  `all` request takes only `universal`/`noarch`. Split uploads are looked for **before**
+  single-file APKs (`_apkmirror_type_order`), falling through to the plain APK when no
+  bundle row satisfies arch, versionCode and DPI. A version no row satisfies is not
+  guessed at: the source is skipped and the next one tried, and the bytes are still
+  judged by the arch-honesty gate above.
 - **Transfer guards** — `_req` sets connect *and* absolute ceilings plus a low-
   speed stall guard, because a mirror that trickles would otherwise hold a build
   slot forever.

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<!--
+	Fixture for the APKMirror variant picker (.github/traces/test_apkmirror_variants.sh).
+	Rows are transcribed from the live 26.39.6 release page of com.truecaller, with the
+	Architecture / Minimum Version / Screen DPI columns of three uploads that ALL share
+	versionCode 2639006 and differ only in what they run on, plus rows added to cover the
+	spaces the real table left empty (a four-ABI label, an APK-badge upload, an unreadable
+	Minimum Version, a second versionCode).
+
+	Table order is what APKMirror prints (newest variant first); the scraper walks it
+	BOTTOM-UP, so the last row here is the first one it sees. The bottom row is
+	deliberately the arm64-v8a-only one: that is the row a pinned versionCode used to
+	return for every arch, and the reason run 38589077939 published no arm-v7a build.
+
+	  href suffix | badge  | Architecture                              | Min Android        | DPI        | VC
+	  ------------+--------+-------------------------------------------+--------------------+------------+---------
+	  -3-         | BUNDLE | arm64-v8a + armeabi-v7a + x86 + x86_64     | Android 13+        | 480-640dpi | 2639006
+	  -1-         | BUNDLE | arm64-v8a + armeabi-v7a                    | Android 12L+       | 120-480dpi | 2639006
+	  -4-         | BUNDLE | arm64-v8a + armeabi-v7a                    | Android 8.0+       | 480-640dpi | 2639006
+	  -6-         | BUNDLE | arm64-v8a + armeabi-v7a                    | varies with Android| 480-640dpi | 2639006
+	  -5-         | APK    | universal                                  | Android 5.0+       | nodpi      | 2639006
+	  -7-         | BUNDLE | arm64-v8a + armeabi-v7a                    | Android 5.0+       | 480-640dpi | 2639005
+	  -2-         | BUNDLE | arm64-v8a                                  | Android 4.4+       | nodpi      | 2639006
+-->
+<html>
+
+<body>
+    <div class="listWidget">
+        <div class="table-row headerFont">
+            <div class="table-cell rowheight addseparator expand pad dowrap-break-all">
+                <a class="accent_color"
+                    href="/apk/true-software-scandinavia-ab/truecaller-caller-id-block/truecaller-spam-call-blocker-26-39-6-release/truecaller-spam-call-blocker-26-39-6-3-android-apk-download/">26.39.6</a>
+                <span class="apkm-badge success" data-apkm-tooltip="APK bundle with base APK and 8 splits">BUNDLE</span>
+                <br><span class="colorLightBlack">2639006</span>
+                <br><span class="colorLightBlack wrapText"><span style="" class="dateyear_utc"
+                        data-utcdate="10/11/2026 17:22 UTC">October 11, 2026</span></span>
+            </div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">arm64-v8a + armeabi-v7a + x86 + x86_64
+            </div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">Android 13+</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">480-640dpi</div>
+        </div>
+        <div class="table-row headerFont">
+            <div class="table-cell rowheight addseparator expand pad dowrap-break-all">
+                <a class="accent_color"
+                    href="/apk/true-software-scandinavia-ab/truecaller-caller-id-block/truecaller-spam-call-blocker-26-39-6-release/truecaller-spam-call-blocker-26-39-6-1-android-apk-download/">26.39.6</a>
+                <span class="apkm-badge success" data-apkm-tooltip="APK bundle with base APK and 8 splits">BUNDLE</span>
+                <br><span class="colorLightBlack">2639006</span>
+                <br><span class="colorLightBlack wrapText"><span style="" class="dateyear_utc"
+                        data-utcdate="10/2/2026 04:02 UTC">October 2, 2026</span></span>
+            </div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">arm64-v8a + armeabi-v7a</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">Android 12L+</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">120-480dpi</div>
+        </div>
+        <div class="table-row headerFont">
+            <div class="table-cell rowheight addseparator expand pad dowrap-break-all">
+                <a class="accent_color"
+                    href="/apk/true-software-scandinavia-ab/truecaller-caller-id-block/truecaller-spam-call-blocker-26-39-6-release/truecaller-spam-call-blocker-26-39-6-4-android-apk-download/">26.39.6</a>
+                <span class="apkm-badge success" data-apkm-tooltip="APK bundle with base APK and 5 splits">BUNDLE</span>
+                <br><span class="colorLightBlack">2639006</span>
+                <br><span class="colorLightBlack wrapText"><span style="" class="dateyear_utc"
+                        data-utcdate="10/11/2026 17:22 UTC">October 11, 2026</span></span>
+            </div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">arm64-v8a + armeabi-v7a</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">Android 8.0+</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">480-640dpi</div>
+        </div>
+        <div class="table-row headerFont">
+            <div class="table-cell rowheight addseparator expand pad dowrap-break-all">
+                <a class="accent_color"
+                    href="/apk/true-software-scandinavia-ab/truecaller-caller-id-block/truecaller-spam-call-blocker-26-39-6-release/truecaller-spam-call-blocker-26-39-6-6-android-apk-download/">26.39.6</a>
+                <span class="apkm-badge success" data-apkm-tooltip="APK bundle with base APK and 5 splits">BUNDLE</span>
+                <br><span class="colorLightBlack">2639006</span>
+                <br><span class="colorLightBlack wrapText"><span style="" class="dateyear_utc"
+                        data-utcdate="10/11/2026 17:22 UTC">October 11, 2026</span></span>
+            </div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">arm64-v8a + armeabi-v7a</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">varies with Android</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">480-640dpi</div>
+        </div>
+        <div class="table-row headerFont">
+            <div class="table-cell rowheight addseparator expand pad dowrap-break-all">
+                <a class="accent_color"
+                    href="/apk/true-software-scandinavia-ab/truecaller-caller-id-block/truecaller-spam-call-blocker-26-39-6-release/truecaller-spam-call-blocker-26-39-6-5-android-apk-download/">26.39.6</a>
+                <span class="apkm-badge" data-apkm-tooltip="Standalone APK">APK</span>
+                <br><span class="colorLightBlack">2639006</span>
+                <br><span class="colorLightBlack wrapText"><span style="" class="dateyear_utc"
+                        data-utcdate="10/11/2026 17:22 UTC">October 11, 2026</span></span>
+            </div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">universal</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">Android 5.0+</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">nodpi</div>
+        </div>
+        <div class="table-row headerFont">
+            <div class="table-cell rowheight addseparator expand pad dowrap-break-all">
+                <a class="accent_color"
+                    href="/apk/true-software-scandinavia-ab/truecaller-caller-id-block/truecaller-spam-call-blocker-26-39-6-release/truecaller-spam-call-blocker-26-39-6-7-android-apk-download/">26.39.6</a>
+                <span class="apkm-badge success" data-apkm-tooltip="APK bundle with base APK and 5 splits">BUNDLE</span>
+                <br><span class="colorLightBlack">2639005</span>
+                <br><span class="colorLightBlack wrapText"><span style="" class="dateyear_utc"
+                        data-utcdate="10/11/2026 17:22 UTC">October 11, 2026</span></span>
+            </div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">arm64-v8a + armeabi-v7a</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">Android 5.0+</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">480-640dpi</div>
+        </div>
+        <div class="table-row headerFont">
+            <div class="table-cell rowheight addseparator expand pad dowrap-break-all">
+                <a class="accent_color"
+                    href="/apk/true-software-scandinavia-ab/truecaller-caller-id-block/truecaller-spam-call-blocker-26-39-6-release/truecaller-spam-call-blocker-26-39-6-2-android-apk-download/">26.39.6</a>
+                <span class="apkm-badge success" data-apkm-tooltip="APK bundle with base APK and 4 splits">BUNDLE</span>
+                <br><span class="colorLightBlack">2639006</span>
+                <br><span class="colorLightBlack wrapText"><span style="" class="dateyear_utc"
+                        data-utcdate="10/11/2026 17:22 UTC">October 11, 2026</span></span>
+            </div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">arm64-v8a</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">Android 4.4+</div>
+            <div class="table-cell rowheight addseparator expand pad dowrap">nodpi</div>
+        </div>
+    </div>
+</body>
+
+</html>

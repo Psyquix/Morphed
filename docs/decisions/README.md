@@ -43,6 +43,7 @@ document.
 
 Candidates still unwritten, because the reasoning currently lives only in commit
 messages: pinning a patch source's `patches-version` to a tag vs resolving the
-keyword from the state snapshot (2fced014), the universal-bundle strategy on
-APKMirror (20eb4e5a), and why the archive release is the download target for module
-update pointers rather than the numbered release.
+keyword from the state snapshot (2fced014), the APKMirror variant picker — split
+bundle before plain APK, lowest `Minimum Version` first, a pinned versionCode as a
+filter rather than an answer (20eb4e5a) — and why the archive release is the download
+target for module update pointers rather than the numbered release.

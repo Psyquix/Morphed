@@ -5,6 +5,9 @@ on:
     paths:
       - "scripts/build.sh"
       - "scripts/utils.sh"
+      # The APKMirror picker has its own test step below, so a change to only the
+      # python side of it must still run the suite (the bash mirror has to agree).
+      - "scripts/apkmirror_search.py"
       - ".github/traces/**"
   workflow_dispatch:
 
@@ -30,3 +33,4 @@ jobs:
           bash .github/traces/test_patch_versions.sh
           bash .github/traces/test_cache_helpers.sh
           bash .github/traces/test_bundle_helpers.sh
+          bash .github/traces/test_apkmirror_variants.sh

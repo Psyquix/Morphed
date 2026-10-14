@@ -18,7 +18,7 @@ There exists an example below with all defaults shown and all the keys explicitl
 ```toml
 compression-level = 9                # module zip compression level
 remove-rv-integrations-checks = true # remove checks from the revanced integrations
-dpi = "320dpi nodpi"            # dpi packages to be searched in order. 'auto' matches whatever is available. default: "nodpi anydpi auto"
+dpi = "320dpi nodpi"            # apkmirror 'Screen DPI' values to accept; 'auto' also takes whatever else the release has. default: "nodpi anydpi auto"
 
 patches-source = "revanced/revanced-patches" # where to fetch patches bundle from. default: "MorpheApp/morphe-patches"
 patches-source-host = "github"               # source host for patches: "github", "gitlab" or "codeberg". default: "github"
@@ -114,7 +114,7 @@ module-prop-name = "some-app-module"                       # module prop name. d
 # FILE-LEVEL ONLY (an app block cannot change it), and forced off for local builds,
 # where there is no published update branch to point at. default: true in CI, false locally
 enable-module-update = true
-dpi = "360-480dpi"                                         # used to select apk variant from apkmirror. 'auto' matches whatever is available. default: nodpi anydpi auto
+dpi = "360-480dpi"                                         # apkmirror variant filter: rows whose `Screen DPI` column is listed here are preferred, 'auto' accepts whatever else the release has. Among the rows that pass arch/versionCode/dpi, the lowest `Minimum Version` wins so the build installs on the oldest device, then the widest architecture coverage. default: nodpi anydpi auto
 ```
 
 ### Naming & Catalog Hierarchy

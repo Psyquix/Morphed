@@ -1997,6 +1997,47 @@ get_apkmirror_pkg_name() {
 	_apkmirror_html_pkg_name "$__APKMIRROR_RESP__"
 }
 
+# APKMirror's 'Minimum Version' column as a sortable rank: lower = installs on an older
+# device. 'Android 8.0+' -> 800, 'Android 4.0.3+' -> 400, 'Android 12L+' -> 1200 (the L
+# suffix has no number of its own, so it ranks with 12). A column that cannot be read
+# gets the sentinel, which is the last place a row can come: an unreadable column must
+# lose to every row we CAN rank, never borrow a version number it does not have.
+# Mirrors minapi_rank() in scripts/apkmirror_search.py.
+_amk_minapi_rank() { # $1=Minimum Version column text
+	local v=${1,,}
+	if [[ "$v" =~ android[[:space:]]*([0-9]+)(\.([0-9]+))? ]]; then
+		printf '%d' $((100 * ${BASH_REMATCH[1]} + ${BASH_REMATCH[3]:-0}))
+	else
+		printf '999999'
+	fi
+}
+
+# Can one variant row serve the requested arch, and how much of it does it cover?
+# Echoes 0 (the row carries more ABIs than asked for: one fetch serves several builds)
+# or 1 (exactly the requested ABI); rc 1 with no output means unusable. A multi-ABI
+# column is matched by MEMBERSHIP, not by whole-string equality against a fixed list of
+# spellings - 'arm64-v8a + armeabi-v7a + x86 + x86_64' carries arm-v7a just as the
+# two-ABI form does, and a matcher that only knew the two spellings it had seen used to
+# drop such a row entirely. A catch-all request may only take a row that carries
+# everything. Mirrors arch_class() in scripts/apkmirror_search.py.
+_amk_arch_class() { # $1=Architecture column  $2=requested arch token
+	local a=${1,,} b=${2,,} t n=0 hit=false
+	if [ -z "$a" ]; then return 1; fi
+	if [ "$a" = "universal" ] || [ "$a" = "noarch" ]; then printf '0'; return 0; fi
+	case "$b" in all | universal | auto | "") return 1 ;; esac
+	local -a toks=()
+	IFS='+' read -ra toks <<<"$a"
+	for t in "${toks[@]}"; do
+		t=${t// /}
+		if [ -n "$t" ]; then
+			n=$((n + 1))
+			if [ "$t" = "$b" ]; then hit=true; fi
+		fi
+	done
+	if [ "$hit" != true ]; then return 1; fi
+	if [ "$n" -gt 1 ]; then printf '0'; else printf '1'; fi
+}
+
 apkmirror_search() {
 	local resp="$1" dpi="$2" arch="$3" apk_bundle="$4" clean_search_version="$5" search_version="$6" target_vc="${7:-}"
 	
@@ -2030,9 +2071,7 @@ apkmirror_search() {
 		fi
 	fi
 
-	local best_fallback_url=""
-	local specific_arch_url=""
-	local specific_arch_fallback_url=""
+	local best_k="" best_url="" k rank cls dcls
 
 	for ((n = 1; n < 100; n++)); do
 		node=$($HTMLQ "div.table-row.headerFont:nth-last-child($n)" <<<"$resp")
@@ -2041,11 +2080,12 @@ apkmirror_search() {
 		dlurl=$($HTMLQ --base https://www.apkmirror.com --attribute href "div.table-cell:nth-child(1) > a:nth-child(1)" <<<"$node")
 		if [ -z "$dlurl" ]; then continue; fi
 
-		local node_apk_bundle node_arch node_dpi node_vc
+		local node_apk_bundle node_arch node_min_ver node_dpi node_vc
 		node_apk_bundle=$($HTMLQ "div.table-cell:nth-child(1) span.apkm-badge:first-of-type" --text <<<"$node" | xargs)
 		[ -z "$node_apk_bundle" ] && node_apk_bundle="APK"
 
 		node_arch=$($HTMLQ "div.table-cell:nth-child(2)" --text <<<"$node" | xargs)
+		node_min_ver=$($HTMLQ "div.table-cell:nth-child(3)" --text <<<"$node" | xargs)
 		node_dpi=$($HTMLQ "div.table-cell:nth-child(4)" --text <<<"$node" | xargs)
 		node_vc=""
 		local vc_regex='class="colorLightBlack"[^>]*>([0-9]+)</span>'
@@ -2068,45 +2108,50 @@ apkmirror_search() {
 			fi
 		fi
 
+		# A pinned versionCode narrows the rows; it does not END the search. Several
+		# variants share one versionCode and differ only in arch, DPI and minimum
+		# Android, so returning the first numeric match handed the arm-v7a build the
+		# arm64-only file - which the arch-honesty gate then rejected, dropping the whole
+		# source and the build with it (docs/decisions/0007).
 		if [ -n "$target_vc" ]; then
-			if [ -n "$node_vc" ] && [ "$node_vc" = "$target_vc" ]; then
-				echo "$dlurl"
-				return 0
-			else
+			if [ -z "$node_vc" ] || [ "$node_vc" != "$target_vc" ]; then
 				continue
 			fi
 		fi
 
-		# Pass 1 Logic: Return Universal/Fat Bundles immediately to optimize cache size
-		if isoneof "$node_arch" 'universal' 'noarch' 'arm64-v8a + x86_64' 'arm64-v8a + armeabi-v7a'; then
-			if isoneof "$node_dpi" "${appdpi[@]}"; then
-				echo "$dlurl"
-				return 0
-			elif [ "$match_any_dpi" = true ] && [ -z "$best_fallback_url" ]; then
-				best_fallback_url="$dlurl"
-			fi
-		# Pass 2 Logic: If it's strictly the requested arch, save it as a fallback in case no universal is found
-		elif [ "$node_arch" = "$arch" ]; then
-			if isoneof "$node_dpi" "${appdpi[@]}"; then
-				[ -z "$specific_arch_url" ] && specific_arch_url="$dlurl"
-			elif [ "$match_any_dpi" = true ] && [ -z "$specific_arch_fallback_url" ]; then
-				specific_arch_fallback_url="$dlurl"
-			fi
+		# Ranking tuple, packed into one integer so the comparison is locale-free and
+		# needs no external sort: (minimum Android, arch coverage, DPI match, table
+		# position). Lowest wins; the trailing row index makes keys unique, so a tie
+		# keeps the row that was seen first (the bottom of the table), as before.
+		# Mirrors the tuple in apkmirror_search() of scripts/apkmirror_search.py.
+		if ! cls=$(_amk_arch_class "$node_arch" "$arch"); then continue; fi
+		if isoneof "$node_dpi" "${appdpi[@]}"; then
+			dcls=0
+		elif [ "$match_any_dpi" = true ]; then
+			dcls=1
+		else
+			continue
+		fi
+		rank=$(_amk_minapi_rank "$node_min_ver")
+		k=$((rank * 10000 + cls * 1000 + dcls * 100 + n))
+		if [ -z "$best_k" ] || [ "$k" -lt "$best_k" ]; then
+			best_k=$k
+			best_url="$dlurl"
 		fi
 	done
 
-	if [ -n "$best_fallback_url" ]; then
-		echo "$best_fallback_url"
-		return 0
-	elif [ -n "$specific_arch_url" ]; then
-		echo "$specific_arch_url"
-		return 0
-	elif [ -n "$specific_arch_fallback_url" ]; then
-		echo "$specific_arch_fallback_url"
-		return 0
-	fi
-	return 1
+	if [ -z "$best_url" ]; then return 1; fi
+	echo "$best_url"
 }
+
+# Badge kinds in the order APKMirror's variant rows are considered, one per line:
+# split uploads (.apkm/.xapk) BEFORE single-file APKs. A bundle carries the ABIs and the
+# densities one build asked for in a single fetch, and it is the shape the morphe
+# passthrough can ship without a merge; the arch, versionCode and DPI predicates inside
+# apkmirror_search still have to agree, and when no bundle row satisfies them the loop
+# falls through to plain APKs. Spelled out on its own because it is a stated preference,
+# not an implementation detail, and the trace test asserts it.
+_apkmirror_type_order() { printf 'BUNDLE\nAPK\n'; }
 
 dl_apkmirror() {
 	local url=$1 version=${2// /-} output=$3 arch=$4 dpi=$5 is_bundle=false get_latest_ver=${6:-false} version_code=${7:-}
@@ -2286,12 +2331,7 @@ dl_apkmirror() {
 	local node dlurl=""
 	node=$($HTMLQ "div.table-row.headerFont:nth-last-child(1)" -r "span:nth-child(n+3)" <<<"$resp")
 	if [ "$node" ]; then
-		if [ "${args[prefer_dl_mode]:-}" = "bundle" ]; then
-			types="BUNDLE APK"
-		else
-			types="APK BUNDLE"
-		fi
-		for type in $types; do
+		for type in $(_apkmirror_type_order); do
 			if dlurl=$(apkmirror_search "$resp" "$dpi" "$arch" "$type" "$clean_search_version" "$search_version" "$version_code"); then
 				[ "$type" = "BUNDLE" ] && is_bundle=true || is_bundle=false
 				break
