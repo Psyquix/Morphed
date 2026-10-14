@@ -1,6 +1,6 @@
 {
-  "version": "v21.41.525 (patches dev.6.mpp)",
-  "versionCode": 260263,
+  "version": "v21.41.525 (patches dev.7.mpp)",
+  "versionCode": 260269,
   "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/youtube-morphe-experimental-module-v21.41.525-arm-v7a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260263.md"
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260269.md"
 }
