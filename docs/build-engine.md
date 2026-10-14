@@ -224,11 +224,16 @@ for adding surface without a measured gain
    [Duplicate-build suppression](#duplicate-build-suppression-tempunchanged-statebuild_content_hashesjson))
    never reaches this point: it writes no fragment. Because fragments share one key across arches,
    the fold keeps the first-wins scalars (`version`, `applied_patches`) for
-   backward compatibility **and** records an additive `archVersion` / `archApplied`
-   map keyed by the filename arch token, so a mixed-version build retains each
-   arch's real version and patch set. `build_make_manifest.py` resolves each file's
-   version from the filename first, then the `archVersion` map, then the scalar (and
-   its patches from `archApplied` then the scalar). `generate_release_notes.py`
+   backward compatibility **and** records additive `archVersion` / `archApplied`
+   maps: `archVersion` keyed by the filename arch token, `archApplied` keyed by
+   `token/kind` (`apk` vs the module `zip`), so a mixed-version build retains each
+   arch's real version and each artifact's real patch set — under `build-mode`
+   `both` one arch yields both an APK and a module whose applied sets differ
+   (module mode disables the microG/GmsCore patches), which a token-only key
+   would collapse to whichever fragment sorts last. `build_make_manifest.py`
+   resolves each file's version from the filename first, then the `archVersion`
+   map, then the scalar (and its patches from `archApplied` at the file's own
+   `arch/kind`, then the scalar). `generate_release_notes.py`
    derives each file's version straight from its filename and splits an app into one
    release-note bullet per distinct version, so a fallback arch is never reported
    under the other arch's version.
