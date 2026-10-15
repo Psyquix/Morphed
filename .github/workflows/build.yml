@@ -173,6 +173,30 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: bash .github/scripts/build_report_failures.sh
 
+      # Reconcile the pending-build state (ADR 0010) from the same temp/failures
+      # records the report used: successes move into built_shape and clear their
+      # pending entry, failures re-queue as a retry (parked at the cap). Skipped on
+      # an explicit cancellation so a half-finished run cannot mark unattempted apps
+      # as built.
+      - name: Reconcile pending-build retry state
+        id: retry_state
+        if: ${{ !cancelled() }}
+        env:
+          CONFIG_FILE: ${{ steps.context.outputs.CONFIG_FILE }}
+          RVB_RETRY_MAX: "3"
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: bash .github/scripts/build_update_retry_list.sh
+
+      - name: Commit retry state to data branch
+        # Plumbing writer for state/built_shape.json + state/pending_builds.json.
+        # Separate from the artifact-hash commit below so neither gating changes; a
+        # failed push is non-fatal because the next run's fetch converges.
+        if: ${{ !cancelled() && steps.retry_state.outputs.RETRY_STATE_UPDATED == 'true' }}
+        run: |
+          DATA_COMMIT_MSG="chore: update pending-build retry state" \
+            bash .github/scripts/commit_data_branch.sh || \
+            echo "::warning::Could not push retry state to data (next run converges)"
+
       - name: Check whether anything needs publishing
         id: no_change
         env:

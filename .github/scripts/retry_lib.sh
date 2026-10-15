@@ -93,3 +93,23 @@ retry_arch_requested() {
 retry_list_apps() {
 	jqx -r 'to_entries | map(select(.value | type == "object")) | .[].key' "${1:-/dev/null}"
 }
+
+# retry_to_arr <space-separated tokens> -> sorted, unique JSON array. LC_ALL=C keeps
+# the order byte-stable ("arm-v7a" before "arm64-v8a") regardless of runner locale.
+retry_to_arr() {
+	if [ -z "${1:-}" ]; then
+		printf '[]'
+	else
+		# shellcheck disable=SC2086
+		printf '%s\n' $1 | LC_ALL=C sort -u | jqx -R . | jqx -sc .
+	fi
+}
+
+# retry_app_base <app-label> <arch> — the config table name with the engine's
+# " (<arch>)" build suffix removed, so per-arch failure records regroup under one
+# key. Only the exact " (<arch>)" suffix is stripped.
+retry_app_base() {
+	local app=$1 arch=$2
+	[ -n "$arch" ] && app="${app% ("$arch")}"
+	printf '%s' "$app"
+}
