@@ -1,6 +1,6 @@
 <div align="center"><a href="https://github.com/Safouene1/support-palestine-banner/blob/master/Markdown-pages/Support.md"><img src="https://raw.githubusercontent.com/Safouene1/support-palestine-banner/master/banner-support.svg" alt="Support Palestine" style="width: 100%;"></a></div>
 
-# NullBuilder
+# NullForge
 
 Automatically builds and publishes APKs & Magisk/KernelSU Modules whenever new patches are released.
 
@@ -9,7 +9,7 @@ Automatically builds and publishes APKs & Magisk/KernelSU Modules whenever new p
 - 🌐 [Download Website](https://nullcpy.github.io/)
 - 💬 [Telegram Group](https://t.me/nullstoretg)
 - 📣 [Telegram Channel](https://t.me/s/nullstore_updates)
-- ❤️ [Donate](https://fahim-ahmed05.github.io/donate)
+- ❤️ [Donate](https://fahim-ahmed05.github.io)
 - 🐞 [Report an Issue](https://github.com/nullcpy/rvb/issues/new/choose)
 
 ## 📊 Stats
@@ -25,7 +25,7 @@ Automatically builds and publishes APKs & Magisk/KernelSU Modules whenever new p
 
 Building, testing, and maintaining these automated workflows takes a significant amount of time. If this builder has saved you time or made your life easier, any support is hugely appreciated!
 
-- **❤️ [Donate](https://fahim-ahmed05.github.io/donate)** if you can.
+- **❤️ [Donate](https://fahim-ahmed05.github.io)** if you can.
 - **⭐ Star this repository** (This is a huge help!)
 - **📢 Share the project** with others who might find it useful.
 
