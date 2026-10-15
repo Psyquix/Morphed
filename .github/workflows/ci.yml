@@ -62,6 +62,16 @@ jobs:
         id: compare_apps
         run: bash .github/scripts/ci_compare_app_versions.sh
 
+      # Reconcile the config against what was last built (ADR 0010): enqueue new
+      # apps/arches, prune retries whose arch left the config, and carry over the
+      # build job's pending retries. Always runs (cheap, local jq only) so a
+      # pending item from a previous run keeps the build alive even when nothing
+      # else moved. Writes state/built_shape.json, state/pending_builds.json and
+      # the pending.<channel>.json arrays the generator consumes.
+      - name: Detect config changes
+        id: detect_changes
+        run: bash .github/scripts/ci_detect_config_changes.sh
+
       # Single owner of "is there any work left downstream". Every step below
       # reads these two outputs instead of re-pasting the trigger expressions.
       - name: Classify triggers
@@ -71,6 +81,7 @@ jobs:
           TRIGGER_BETA: ${{ steps.sync_patch_sources.outputs.TRIGGER_BETA || '0' }}
           TRIGGER_BLOCKED: ${{ steps.sync_patch_sources.outputs.TRIGGER_BLOCKED || '0' }}
           TRIGGER_APP_UPDATE: ${{ steps.compare_apps.outputs.TRIGGER_APP_UPDATE || '0' }}
+          TRIGGER_CONFIG_CHANGE: ${{ steps.detect_changes.outputs.TRIGGER_CONFIG_CHANGE || '0' }}
         run: bash .github/scripts/ci_trigger_flags.sh
 
       - name: Check Patch App Updates
@@ -87,6 +98,7 @@ jobs:
           TRIGGER_BETA: ${{ steps.sync_patch_sources.outputs.TRIGGER_BETA }}
           TRIGGER_APP_UPDATE: ${{ steps.compare_apps.outputs.TRIGGER_APP_UPDATE }}
           TRIGGER_BLOCKED: ${{ steps.sync_patch_sources.outputs.TRIGGER_BLOCKED }}
+          TRIGGER_CONFIG_CHANGE: ${{ steps.detect_changes.outputs.TRIGGER_CONFIG_CHANGE }}
         run: bash .github/scripts/ci_generate_configs.sh
 
       - name: Resolve effective triggers
@@ -95,6 +107,7 @@ jobs:
           RAW_TRIGGER_STABLE: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE || '0' }}
           RAW_TRIGGER_BETA: ${{ steps.sync_patch_sources.outputs.TRIGGER_BETA || '0' }}
           RAW_TRIGGER_APP_UPDATE: ${{ steps.compare_apps.outputs.TRIGGER_APP_UPDATE || '0' }}
+          RAW_TRIGGER_CONFIG_CHANGE: ${{ steps.detect_changes.outputs.TRIGGER_CONFIG_CHANGE || '0' }}
         run: bash .github/scripts/ci_resolve_triggers.sh
 
       - name: Notify telegram

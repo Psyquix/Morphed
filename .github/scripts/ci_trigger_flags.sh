@@ -26,6 +26,7 @@ TRIGGER_STABLE=${TRIGGER_STABLE:-0}
 TRIGGER_BETA=${TRIGGER_BETA:-0}
 TRIGGER_BLOCKED=${TRIGGER_BLOCKED:-0}
 TRIGGER_APP_UPDATE=${TRIGGER_APP_UPDATE:-0}
+TRIGGER_CONFIG_CHANGE=${TRIGGER_CONFIG_CHANGE:-0}
 
 sources_changed=0
 anything_changed=0
@@ -34,7 +35,11 @@ if [ "$TRIGGER_STABLE" = "1" ] || [ "$TRIGGER_BETA" = "1" ]; then
   sources_changed=1
 fi
 
-if [ "$sources_changed" = "1" ] || [ "$TRIGGER_BLOCKED" = "1" ] || [ "$TRIGGER_APP_UPDATE" = "1" ]; then
+# A config change (new app / new arch / a pruned retry) reshapes the pool just
+# like an app update does, so it counts toward ANYTHING_CHANGED - but never toward
+# SOURCES_CHANGED, because no patch bundle moved and the relevance scan is not
+# needed.
+if [ "$sources_changed" = "1" ] || [ "$TRIGGER_BLOCKED" = "1" ] || [ "$TRIGGER_APP_UPDATE" = "1" ] || [ "$TRIGGER_CONFIG_CHANGE" = "1" ]; then
   anything_changed=1
 fi
 

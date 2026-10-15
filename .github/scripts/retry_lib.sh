@@ -9,6 +9,12 @@
 # scripts, and a missing or corrupt one is treated as EMPTY (a no-op), never as
 # "enable everything" - the same fail-safe direction as a blocked-source read.
 
+# jqx <jq-args...> — jq with any stray carriage return stripped from the output.
+# Git-Bash's Windows jq prints CRLF; on the Linux runner jq prints LF. Normalising
+# here keeps a \r from ever leaking into a state key or a --argjson value, so the
+# scripts behave identically on a maintainer's machine and in CI.
+jqx() { jq "$@" 2> /dev/null | tr -d '\r'; }
+
 # The one shape both files share: a per-channel object. Callers merge into it.
 retry_default_state() { printf '{"stable":{},"beta":{}}'; }
 
@@ -17,7 +23,7 @@ retry_default_state() { printf '{"stable":{},"beta":{}}'; }
 retry_load() {
 	local f=${1:-} j
 	if [ -n "$f" ] && [ -s "$f" ]; then
-		j=$(jq -c . "$f" 2> /dev/null) || j=""
+		j=$(jqx -c . "$f") || j=""
 		if [ -n "$j" ] && [ "$j" != "null" ]; then
 			printf '%s' "$j"
 			return 0
@@ -35,7 +41,7 @@ retry_channel_of_config() {
 		return 0
 	fi
 	if [[ "$cfg" == *.json ]] && [ -f "$cfg" ]; then
-		pv=$(jq -r '."patches-version" // empty' "$cfg" 2> /dev/null) || pv=""
+		pv=$(jqx -r '."patches-version" // empty' "$cfg") || pv=""
 		[ "$pv" = "beta" ] && {
 			echo beta
 			return 0
@@ -63,7 +69,7 @@ retry_normalize_arch() {
 # the "both" default. Output is the normalized set, one line.
 retry_effective_arch() {
 	local cfg=${1:-} key=${2:-} arch
-	arch=$(jq -r --arg k "$key" '.[$k].arch // empty' "$cfg" 2> /dev/null) || arch=""
+	arch=$(jqx -r --arg k "$key" '.[$k].arch // empty' "$cfg") || arch=""
 	retry_normalize_arch "$arch"
 }
 
@@ -85,5 +91,5 @@ retry_arch_requested() {
 # retry_list_apps <config-file> — the app keys of a compiled config (objects only,
 # so the top-level "patches-version" string is skipped).
 retry_list_apps() {
-	jq -r 'to_entries | map(select(.value | type == "object")) | .[].key' "${1:-/dev/null}" 2> /dev/null
+	jqx -r 'to_entries | map(select(.value | type == "object")) | .[].key' "${1:-/dev/null}"
 }

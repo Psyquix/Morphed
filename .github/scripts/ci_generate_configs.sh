@@ -71,8 +71,14 @@ read -r -d '' POOL_PROGRAM <<'JQ' || true
        end) as $app_update_ok |
 
       # Membership only: the trigger rules decide who is enabled, and a written
-      # version - channel keyword or concrete pin - is never rewritten here.
-      if ((($srcs - $active[0]) != $srcs) and ($activePatchApps[0] | index($k))) or (($activeApps[0] | index($k)) and $app_update_ok) then
+      # version - channel keyword or concrete pin - is never rewritten here. A key
+      # on the pending list (new app / new arch / carried-over retry, ADR 0010) is
+      # force-enabled regardless of the source/version rules; a human-disabled app
+      # can never appear here because compile_patch_configs omits it from the base
+      # config entirely.
+      if ($pendingKeys[0] | index($k)) then
+        .value.enabled = true
+      elif ((($srcs - $active[0]) != $srcs) and ($activePatchApps[0] | index($k))) or (($activeApps[0] | index($k)) and $app_update_ok) then
         .
       else
         (.value.enabled = false)
@@ -81,26 +87,34 @@ read -r -d '' POOL_PROGRAM <<'JQ' || true
   )
 JQ
 
-# A pool is regenerated when its own channel moved, or when any structural event
-# that can change membership happened (app updates, blocked sources).
+# A pool is regenerated when its own channel moved, when any structural event
+# that can change membership happened (app updates, blocked sources), or when
+# that channel still has a non-parked pending item to build (ADR 0010).
 channel_triggered() {
-  [ "${TRIGGER_BLOCKED:-0}" = "1" ] || [ "${TRIGGER_APP_UPDATE:-0}" = "1" ] || [ "${1:-0}" = "1" ]
+  local ch="$1" trig="${2:-0}" n
+  if [ "${TRIGGER_BLOCKED:-0}" = "1" ] || [ "${TRIGGER_APP_UPDATE:-0}" = "1" ] || [ "$trig" = "1" ]; then
+    return 0
+  fi
+  n=$(jq 'length' "pending.$ch.json" 2> /dev/null || echo 0)
+  [ "${n:-0}" -gt 0 ]
 }
 
 generate_pool() {
   local channel="$1" active_file="$2" patch_apps_file="$3" out="$4"
+  [ -f "pending.$channel.json" ] || echo '[]' > "pending.$channel.json"
   jq --argjson tags "$TAGS_NEW" \
      --arg channel "$channel" \
      --slurpfile active "$active_file" \
      --slurpfile activeApps active_apps.json \
      --slurpfile activePatchApps "$patch_apps_file" \
+     --slurpfile pendingKeys "pending.$channel.json" \
      "$POOL_PROGRAM" "config.$channel.json" > "$out"
 }
 
-if channel_triggered "${TRIGGER_STABLE:-0}"; then
+if channel_triggered stable "${TRIGGER_STABLE:-0}"; then
   generate_pool stable active.stable.json active_patch_apps.stable.json configs/stable_build.json
 fi
 
-if channel_triggered "${TRIGGER_BETA:-0}"; then
+if channel_triggered beta "${TRIGGER_BETA:-0}"; then
   generate_pool beta active.beta.json active_patch_apps.beta.json configs/beta_build.json
 fi
