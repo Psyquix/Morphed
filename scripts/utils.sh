@@ -2199,44 +2199,53 @@ dl_apkmirror() {
 		fi
 	fi
 
+	# APKMirror's release slug keeps an underscore that appears in the version
+	# (e.g. "4.50.1_tv" -> "4-50-1_tv"), so do NOT fold it into a dash here; the
+	# all-dash form is still tried as a secondary candidate in the guess loop below.
 	local search_version="${version//./-}"
-	search_version="${search_version//_/-}"
 	search_version="${search_version,,}"
-	search_version="${search_version//[^a-z0-9-]/}"
+	search_version="${search_version//[^a-z0-9_-]/}"
 	search_version="${search_version//---/-}"
+	local search_version_dash="${search_version//_/-}"
 
 	if [ -z "$release_url" ]; then
-		local apkmname cat_slug cand guess_url guess_resp guess_pkg page_ok
+		local apkmname cat_slug cand vform vforms guess_url guess_resp guess_pkg page_ok
 		apkmname=$($HTMLQ "h1.marginZero" --text <<<"$__APKMIRROR_RESP__")
 		apkmname="${apkmname,,}" apkmname="${apkmname// /-}" apkmname="${apkmname//[^a-z0-9-]/}"
 		# APKMirror release slugs usually follow the <h1> app title, but some apps
-		# publish under the short category slug instead (e.g. CapCut, whose title
-		# is "CapCut - Video Editor" but whose releases live at capcut-<ver>-release).
-		# Try both, and only accept a guess whose page really belongs to the target
-		# package, so a wrong slug falls through to the category-list scrape below
-		# rather than tripping the package guard and aborting the whole source.
+		# publish under the short category slug instead (e.g. CapCut, whose title is
+		# "CapCut - Video Editor" but whose releases live at capcut-<ver>-release),
+		# and the version part may carry an underscore (ViX "4.50.1_tv"). Try every
+		# (name, version) combination, and only accept a guess whose page really
+		# belongs to the target package, so a wrong guess falls through to the
+		# category-list scrape below rather than tripping the package guard and
+		# aborting the whole source.
 		cat_slug="${url%/}"; cat_slug="${cat_slug##*/}"
+		vforms="$search_version"
+		[ "$search_version_dash" != "$search_version" ] && vforms="${vforms} ${search_version_dash}"
 		for cand in "$apkmname" "$cat_slug"; do
 			[ -z "$cand" ] && continue
-			guess_url="${url%/}/${cand}-${search_version}-release/"
-			__SILENT_CF_GET__=true _cf_get "$guess_url" || true
-			guess_resp="$html"
-			[ -z "$guess_resp" ] && continue
-			if [[ "$guess_resp" == *"Page Not Found"* ]] || [[ "$guess_resp" == *"404 Whoops"* ]]; then
-				continue
-			fi
-			page_ok=true
-			if [ -n "${pkg_name:-}" ]; then
-				guess_pkg=$(_apkmirror_html_pkg_name "$guess_resp")
-				if [ -n "$guess_pkg" ] && [ "$guess_pkg" != "$pkg_name" ]; then
-					page_ok=false
+			for vform in $vforms; do
+				guess_url="${url%/}/${cand}-${vform}-release/"
+				__SILENT_CF_GET__=true _cf_get "$guess_url" || true
+				guess_resp="$html"
+				[ -z "$guess_resp" ] && continue
+				if [[ "$guess_resp" == *"Page Not Found"* ]] || [[ "$guess_resp" == *"404 Whoops"* ]]; then
+					continue
 				fi
-			fi
-			if [ "$page_ok" = true ]; then
-				release_url="$guess_url"
-				resp="$guess_resp"
-				break
-			fi
+				page_ok=true
+				if [ -n "${pkg_name:-}" ]; then
+					guess_pkg=$(_apkmirror_html_pkg_name "$guess_resp")
+					if [ -n "$guess_pkg" ] && [ "$guess_pkg" != "$pkg_name" ]; then
+						page_ok=false
+					fi
+				fi
+				if [ "$page_ok" = true ]; then
+					release_url="$guess_url"
+					resp="$guess_resp"
+					break 2
+				fi
+			done
 		done
 		[ -z "$release_url" ] && resp=""
 	fi
