@@ -135,10 +135,11 @@ for json in "$FAILURES_DIR"/*_np.json; do
 	tried="$(jq -r '.tried // empty' "$json")"
 	ver="$(printf '%s' "$tried" | tr ',' '\n' | sed -e 's/^v//' -e '/^$/d' -e 's/^/v/' | paste -sd ' ' -)"
 	vc="$(jq -r '.vc // empty' "$json")"
+	patch_url="$(jq -r '.patch_url // empty' "$json")"
 	base="$(app_base "$app" "$arch")"
-	# Same six columns as the other modes (arch|ver|vc|log|patches|pkg); the log is
-	# absent because build_rv returned clean.
-	NREC[$base]+="${arch}|${ver}|${vc}||${patches}|${pkg}${NL}"
+	# Columns: arch|ver|vc|log|patches|pkg|patch_url; the log is absent because
+	# build_rv returned clean, and patch_url names the bundle release that refused.
+	NREC[$base]+="${arch}|${ver}|${vc}||${patches}|${pkg}|${patch_url}${NL}"
 	[ -z "${NORDERSET[$base]:-}" ] && { NORDER+="${base}${NL}"; NORDERSET[$base]=1; }
 done
 shopt -u nullglob
@@ -156,7 +157,7 @@ search_links() { # $1=pkg $2=base $3=ver(label, maybe 'vX')
 	local enc q
 	q="${1:-$2}${3:+ ${3#v}} android apk"
 	enc="$(jq -rn --arg q "$q" '$q|@uri')"
-	printf '[Search Google](https://www.google.com/search?q=%s) / [DuckDuckGo](https://duckduckgo.com/?q=%s) / [Brave](https://search.brave.com/search?q=%s)' "$enc" "$enc" "$enc"
+	printf 'Search [Google](https://www.google.com/search?q=%s) / [DuckDuckGo](https://duckduckgo.com/?q=%s) / [Brave](https://search.brave.com/search?q=%s)' "$enc" "$enc" "$enc"
 }
 
 # render_app_group <base> <blob> <mode build|dl|np> — one grouped app block. All
@@ -164,13 +165,13 @@ search_links() { # $1=pkg $2=base $3=ver(label, maybe 'vX')
 # the search engines, np links the patch bundle that refused the versions. Build adds a
 # Patches line naming the failing bundle.
 render_app_group() { # $1=base $2=blob $3=mode
-	local base=$1 blob=$2 mode=$3 out arch ver vc log patches pkg tok links
+	local base=$1 blob=$2 mode=$3 out arch ver vc log patches pkg patch_url tok links
 	out="📱 $(md_clean "$base")"
 	if [ "$mode" = build ]; then
 		patches=$(uniq_col 5 "$blob" | head -1)
 		[ -n "$patches" ] && out+="${NL}  ╰ Patches: [$(md_clean "$patches")](https://github.com/$patches)"
 	fi
-	while IFS='|' read -r arch ver vc log patches pkg; do
+	while IFS='|' read -r arch ver vc log patches pkg patch_url; do
 		[ -z "$arch" ] && continue
 		tok="$(arch_token "$ver" "$vc")"
 		if [ "$mode" = build ]; then
@@ -179,7 +180,12 @@ render_app_group() { # $1=base $2=blob $3=mode
 		elif [ "$mode" = np ]; then
 			# No log, no APK to hunt for: the bundle is the thing that has to change.
 			[ -z "$patches" ] && { out+="${NL}  ╰ ${arch}${tok:+ ${tok}}"; continue; }
-			links="[Patch bundle](https://github.com/$patches)"
+			if [ -n "$patch_url" ]; then
+				# Deep-link the exact release that refused, labelled with its tag.
+				links="[$(md_clean "$patches/${patch_url##*/}")](${patch_url})"
+			else
+				links="[Patch bundle](https://github.com/$patches)"
+			fi
 		else
 			links="$(search_links "$pkg" "$base" "$ver")"
 		fi
@@ -217,29 +223,20 @@ if [ "$cbuild" = 0 ] && [ "$cdl" = 0 ] && [ "$cnp" = 0 ]; then
 fi
 
 MSG=""
+# Each section carries its own hint directly beneath it, so the guidance sits next
+# to the failures it refers to instead of in a block at the very end. Section
+# bodies end in a trailing blank line; $(printf '%s' …) drops it so the hint lands
+# one line under the last app, and sections are joined by a single blank line.
 if [ "$cbuild" -gt 0 ]; then
-	MSG+="*🚨 Build Failed (${cbuild} app$([ "$cbuild" = 1 ] && echo '' || echo 's'))*${NL}${NL}${build_body}"
+	MSG+="*🚨 Build Failed (${cbuild} app$([ "$cbuild" = 1 ] && echo '' || echo 's'))*${NL}${NL}$(printf '%s' "$build_body")${NL}${NL}⚠️ Report the issue to the patch author with the log link."
 fi
 if [ "$cnp" -gt 0 ]; then
-	[ -n "$MSG" ] && MSG+="${NL}"
-	MSG+="*🧩 Patch Compatibility (${cnp} app$([ "$cnp" = 1 ] && echo '' || echo 's'))*${NL}${NL}${np_body}"
+	[ -n "$MSG" ] && MSG+="${NL}${NL}"
+	MSG+="*🧩 Patch Compatibility (${cnp} app$([ "$cnp" = 1 ] && echo '' || echo 's'))*${NL}${NL}$(printf '%s' "$np_body")${NL}${NL}⚠️ These versions have no patch to apply or no patch for that arch."
 fi
 if [ "$cdl" -gt 0 ]; then
-	[ -n "$MSG" ] && MSG+="${NL}"
-	MSG+="*📡 Download Failures (${cdl} app$([ "$cdl" = 1 ] && echo '' || echo 's'))*${NL}${NL}${dl_body}"
-fi
-
-# Trim trailing blank lines before the hints / run link.
-while [ "${MSG%$'\n'}" != "$MSG" ]; do MSG="${MSG%$'\n'}"; done
-
-if [ "$cbuild" -gt 0 ]; then
-	MSG+="${NL}${NL}⚠️ Report the issue to the patch author with the log link."
-fi
-if [ "$cnp" -gt 0 ]; then
-	MSG+="${NL}${NL}⚠️ These versions have no patch to apply (or no build for that arch): the bundle must catch up."
-fi
-if [ "$cdl" -gt 0 ]; then
-	MSG+="${NL}${NL}ℹ️ Upload the APK to the [cache repo](https://github.com/${APKS_REPO:-nullcpy/apks}) manually."
+	[ -n "$MSG" ] && MSG+="${NL}${NL}"
+	MSG+="*📡 Download Failures (${cdl} app$([ "$cdl" = 1 ] && echo '' || echo 's'))*${NL}${NL}$(printf '%s' "$dl_body")${NL}${NL}ℹ️ Upload the APK to the [cache repo](https://github.com/${APKS_REPO:-nullcpy/apks}) manually."
 fi
 
 if [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then

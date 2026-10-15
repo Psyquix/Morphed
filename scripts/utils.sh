@@ -270,14 +270,15 @@ write_dl_failure_descriptor() { # $1=slug $2=app $3=version $4=vc $5=arch $6=pkg
 # is already cached and sends the patch author no message at all. Like the dl record
 # it uses its own suffix, because the parent deletes <slug>.json/.log on a clean (rc 0)
 # return and build_rv skips with rc 0 here.
-# $1=slug $2=app $3=versions-tried $4=requested $5=vc $6=arch $7=patches_src $8=pkg
+# $1=slug $2=app $3=versions-tried $4=requested $5=vc $6=arch $7=patches_src $8=pkg $9=patch-release-url
 write_no_patches_failure_descriptor() {
 	[ -n "${TEMP_DIR:-}" ] || return 0
 	local dir="$TEMP_DIR/failures"
 	mkdir -p "$dir" 2> /dev/null || return 0
 	jq -n --arg type "no_compatible_patches" --arg app "$2" --arg tried "$3" \
 		--arg version "$4" --arg vc "$5" --arg arch "$6" --arg patches_src "$7" --arg pkg "$8" \
-		'{type:$type, app:$app, tried:$tried, version:$version, vc:$vc, arch:$arch, patches_src:$patches_src, pkg:$pkg}' \
+		--arg patch_url "$9" \
+		'{type:$type, app:$app, tried:$tried, version:$version, vc:$vc, arch:$arch, patches_src:$patches_src, pkg:$pkg, patch_url:$patch_url}' \
 		> "$dir/$1_np.json" 2> /dev/null || true
 }
 # env -i keeps JVM runs hermetic; XDG_DATA_HOME is forwarded so callers can
@@ -5192,7 +5193,8 @@ build_rv() {
 			write_no_patches_failure_descriptor "$(failure_slug "$table")" "$table" \
 				"$_tried_versions" \
 				"${resolved_version:-$version_mode}" "$(parse_arch_mapping "${args[version_code]:-}" "${arch_f:-}")" \
-				"${arch_f:-}" "${args[patches_src]:-${args[cli_source]:-}}" "$pkg_name"
+				"${arch_f:-}" "${args[patches_src]:-${args[cli_source]:-}}" "$pkg_name" \
+				"${args[changelog_url]%% *}"
 			return 0
 		fi
 		epr "ERROR: Could not download '${table}' after trying all supported versions."
