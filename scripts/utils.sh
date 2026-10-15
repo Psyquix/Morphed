@@ -2205,15 +2205,39 @@ dl_apkmirror() {
 	search_version="${search_version//---/-}"
 
 	if [ -z "$release_url" ]; then
-		local apkmname
+		local apkmname cat_slug cand guess_url guess_resp guess_pkg page_ok
 		apkmname=$($HTMLQ "h1.marginZero" --text <<<"$__APKMIRROR_RESP__")
 		apkmname="${apkmname,,}" apkmname="${apkmname// /-}" apkmname="${apkmname//[^a-z0-9-]/}"
-		release_url="${url%/}/${apkmname}-${search_version}-release/"
-		__SILENT_CF_GET__=true _cf_get "$release_url" || true
-		resp="$html"
-		if [[ "$resp" == *"Page Not Found"* ]] || [[ "$resp" == *"404 Whoops"* ]] || [ -z "$resp" ]; then
-			release_url=""
-		fi
+		# APKMirror release slugs usually follow the <h1> app title, but some apps
+		# publish under the short category slug instead (e.g. CapCut, whose title
+		# is "CapCut - Video Editor" but whose releases live at capcut-<ver>-release).
+		# Try both, and only accept a guess whose page really belongs to the target
+		# package, so a wrong slug falls through to the category-list scrape below
+		# rather than tripping the package guard and aborting the whole source.
+		cat_slug="${url%/}"; cat_slug="${cat_slug##*/}"
+		for cand in "$apkmname" "$cat_slug"; do
+			[ -z "$cand" ] && continue
+			guess_url="${url%/}/${cand}-${search_version}-release/"
+			__SILENT_CF_GET__=true _cf_get "$guess_url" || true
+			guess_resp="$html"
+			[ -z "$guess_resp" ] && continue
+			if [[ "$guess_resp" == *"Page Not Found"* ]] || [[ "$guess_resp" == *"404 Whoops"* ]]; then
+				continue
+			fi
+			page_ok=true
+			if [ -n "${pkg_name:-}" ]; then
+				guess_pkg=$(_apkmirror_html_pkg_name "$guess_resp")
+				if [ -n "$guess_pkg" ] && [ "$guess_pkg" != "$pkg_name" ]; then
+					page_ok=false
+				fi
+			fi
+			if [ "$page_ok" = true ]; then
+				release_url="$guess_url"
+				resp="$guess_resp"
+				break
+			fi
+		done
+		[ -z "$release_url" ] && resp=""
 	fi
 
 	if [ -z "$release_url" ]; then
