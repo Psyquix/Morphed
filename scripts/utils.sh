@@ -2371,6 +2371,24 @@ dl_apkmirror() {
 				break
 			fi
 		done
+		# A pinned version code is a preference, not a veto. When the bundle's per-ABI
+		# code is wrong (an author stamping the arm64 code on every ABI - MacroDroid
+		# 5.66.9 lists ARMEABI_V7A=896600011, but the real arm-v7a build is 796600011),
+		# the code+arch predicate is unsatisfiable even though a matching-arch build of
+		# the SAME version exists. Retry by arch+version only, dropping just the numeric
+		# code: arch stays a hard requirement (ADR 0007), the caller re-keys the artifact
+		# to its real code, and patch application remains the compatibility gate
+		# (docs/decisions/0011-version-code-fallback-to-arch.md).
+		if [ -z "$dlurl" ] && [ -n "$version_code" ]; then
+			for type in $(_apkmirror_type_order); do
+				if dlurl=$(apkmirror_search "$resp" "$dpi" "$arch" "$type" "$clean_search_version" "$search_version" ""); then
+					[ "$type" = "BUNDLE" ] && is_bundle=true || is_bundle=false
+					DL_VC_ARCH_FALLBACK=1
+					wpr "No '$arch' variant carries pinned version code '$version_code' for $version; selecting the '$arch' build by architecture alone"
+					break
+				fi
+			done
+		fi
 		if [ -z "$dlurl" ]; then
 			if [ -n "$version_code" ]; then
 				wpr "Could not find variant with version code '$version_code' for version '$version' on APKMirror"
@@ -4954,6 +4972,7 @@ build_rv() {
 							continue
 						fi
 					fi
+					DL_VC_ARCH_FALLBACK=""
 					if ! dl_${dl_p} "${args[${dl_p}_dlurl]}" "$version" "$stock_apk" "$arch" "${args[dpi]}" "$get_latest_ver" "$target_version_code"; then
 						pr "ERROR: Could not download '${table}' from '${dl_p}' with version '${version}', arch '${arch}', dpi '${args[dpi]}'"
 						rm -f "$stock_apk" "${stock_apk%.apk}".* "${stock_apk}".*
@@ -5029,9 +5048,39 @@ build_rv() {
 								rm -f "$stock_apk" "${stock_apk%.apk}".* "${stock_apk}".*
 								continue
 							elif [ "$downloaded_vc" != "$target_version_code" ]; then
-								epr "ERROR: Downloaded APK version code ($downloaded_vc) does not match expected ($target_version_code). Rejecting..."
-								rm -f "$stock_apk" "${stock_apk%.apk}".* "${stock_apk}".*
-								continue
+								if [ "${DL_VC_ARCH_FALLBACK:-}" = 1 ] && [ "$dl_p" = apkmirror ]; then
+									# The picker returned the right arch at the right version under a
+									# different code than the bundle pinned. Re-key the staged artifact
+									# (and any sidecar) to its real code so the cache filename, the
+									# upload and the patch gate all describe the bytes we actually hold.
+									wpr "Re-keying '$arch' '$pkg_name' to its real version code $downloaded_vc (bundle pinned $target_version_code, which no '$arch' build carries)"
+									local _rk_old="-${target_version_code}-" _rk_new="-${downloaded_vc}-" _rk_newstock _rk_bext
+									_rk_newstock="${stock_apk/$_rk_old/$_rk_new}"
+									if [ "$_rk_newstock" != "$stock_apk" ]; then
+										mv -f "$stock_apk" "$_rk_newstock" 2> /dev/null || true
+										for _rk_bext in xapk apkm apks bundle; do
+											[ -e "${stock_apk%.apk}.${_rk_bext}" ] && mv -f "${stock_apk%.apk}.${_rk_bext}" "${_rk_newstock%.apk}.${_rk_bext}" 2> /dev/null || true
+										done
+										stock_apk="$_rk_newstock"
+									fi
+									vc_infix="-${downloaded_vc}"
+									all_apk="${apk_dl_dir}/${pkg_name}-${version_f}${vc_infix}-all.apk"
+									cached_stock_apk="${apk_cache_dir}/${pkg_name}-${version_f}${vc_infix}-${arch_f}.apk"
+									cached_all_apk="${apk_cache_dir}/${pkg_name}-${version_f}${vc_infix}-all.apk"
+									target_version_code="$downloaded_vc"
+									DL_VC_ARCH_FALLBACK=""
+									# Stamp the still-open failure descriptor so the retry writer parks
+									# this app (a code-fallback failure is genuine, not transient) and the
+									# report can say so. On success the parent deletes the descriptor.
+									local _rk_fd="${TEMP_DIR}/failures/$(failure_slug "$table").json"
+									if [ -f "$_rk_fd" ]; then
+										jq -c '. + {vc_fallback:true}' "$_rk_fd" > "${_rk_fd}.tmp" 2> /dev/null && mv -f "${_rk_fd}.tmp" "$_rk_fd" || rm -f "${_rk_fd}.tmp"
+									fi
+								else
+									epr "ERROR: Downloaded APK version code ($downloaded_vc) does not match expected ($target_version_code). Rejecting..."
+									rm -f "$stock_apk" "${stock_apk%.apk}".* "${stock_apk}".*
+									continue
+								fi
 							fi
 						fi
 

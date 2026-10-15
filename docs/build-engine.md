@@ -44,6 +44,11 @@ to `-`) is identical in the pooled child, the serial parent and the CI step.
   means the opposite: no source failed and no APK is missing, the patch set has
   nothing to apply for this version set or this arch, so the report names the bundle
   instead of asking for an upload ([decisions/0009](decisions/0009-effective-patch-set-decides-compatibility.md)).
+- **Version-code fallback** — a build-failure descriptor also carries
+  `vc_fallback: true` when the arch was already fetched through the code→arch fallback
+  (stage 4) and still failed. That is a genuine incompatibility, not a transient miss, so
+  the retry writer parks it rather than re-queueing it and the report says so
+  ([decisions/0011](decisions/0011-version-code-fallback-to-arch.md)).
 
 `temp/failures/` is wiped at the START of `build.sh` and deliberately survives the
 end-of-run sweep, so the `build.yml` "Report build failures" step can read it.
@@ -195,6 +200,12 @@ for adding surface without a measured gain
    and the run falls through to the next source — the arch goes unbuilt if no source
    supplies it, so no file is ever named for an ABI it does not contain
    ([decisions/0007](decisions/0007-requested-arch-is-a-hard-requirement.md)).
+   A pinned `versionCode` is a preference, not a veto: when no APKMirror variant carries
+   both the pinned code and the requested arch (a bundle can stamp the arm64 code on
+   every ABI), `dl_apkmirror` re-selects by arch+version alone and `build_rv` re-keys the
+   artifact to the code read off its bytes, so a wrong per-ABI code cannot drop a
+   buildable arch and patch application decides compatibility
+   ([decisions/0011](decisions/0011-version-code-fallback-to-arch.md)).
    APKPure/APKCombo/Uptodown links carry no ABI in the URL, so the first build to want
    one fetches it **once** and records its bytes in `temp/urlindex`; a later job that
    resolves the same link adopts the stored blob (right arch) or skips the source

@@ -80,7 +80,7 @@ uniq_col() { printf '%s\n' "$2" | cut -d'|' -f"$1" | sed '/^$/d' | awk '!s[$0]++
 
 # ---- Collect records, grouped by app base name (ordered by first sighting) ----
 # Per record the blob is:  arch | version | versionCode | logurl | patches | pkg
-declare -A BREC DREC BORDERSET DORDERSET
+declare -A BREC DREC BORDERSET DORDERSET VCFB
 BORDER=""; DORDER=""
 shopt -s nullglob
 for json in "$FAILURES_DIR"/*.json; do
@@ -105,6 +105,9 @@ for json in "$FAILURES_DIR"/*.json; do
 	fi
 
 	base="$(app_base "$app" "$arch")"
+	# A build that failed even after the engine's version-code arch fallback is a
+	# genuine incompatibility, not a transient miss - flag it for the note below.
+	[ "$(jq -r '.vc_fallback // false' "$json")" = "true" ] && VCFB[$base]=1
 	BREC[$base]+="${arch}|${ver}|${vc}|${logurl}|${patches}|${NL}"
 	[ -z "${BORDERSET[$base]:-}" ] && { BORDER+="${base}${NL}"; BORDERSET[$base]=1; }
 done
@@ -170,6 +173,7 @@ render_app_group() { # $1=base $2=blob $3=mode
 	if [ "$mode" = build ]; then
 		patches=$(uniq_col 5 "$blob" | head -1)
 		[ -n "$patches" ] && out+="${NL}  ╰ Patches: [$(md_clean "$patches")](https://github.com/$patches)"
+		[ -n "${VCFB[$base]:-}" ] && out+="${NL}  ╰ version-code arch fallback already tried; genuine incompatibility (not retried)"
 	fi
 	while IFS='|' read -r arch ver vc log patches pkg patch_url; do
 		[ -z "$arch" ] && continue

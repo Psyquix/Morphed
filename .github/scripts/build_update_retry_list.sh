@@ -57,7 +57,7 @@ bs0="$bs"
 pb0="$pb"
 
 # ---- collect failed arches per app (excluding _np no-patch records) ----
-declare -A FAILED
+declare -A FAILED TERM
 shopt -s nullglob
 for j in "$FAILDIR"/*.json; do
 	case "$j" in *_np.json) continue ;; esac
@@ -66,6 +66,9 @@ for j in "$FAILDIR"/*.json; do
 	[ -n "$app" ] || continue
 	base=$(retry_app_base "$app" "$arch")
 	[ -n "$arch" ] && FAILED[$base]+="$arch "
+	# A failure that already exhausted the engine's version-code arch fallback is
+	# terminal (a real incompatibility), so park it instead of retrying every run.
+	[ -n "$arch" ] && [ "$(jqx -r '.vc_fallback // false' "$j")" = "true" ] && TERM[$base]+="$arch "
 done
 shopt -u nullglob
 
@@ -104,6 +107,12 @@ while IFS= read -r key; do
 		new_att=$(( ${prev_att:-0} + 1 ))
 		parked=false
 		[ "$new_att" -ge "$RVB_RETRY_MAX" ] && parked=true
+		# terminal (version-code fallback already tried): park now and pin attempts to
+		# the cap, so only a config change or a natural rebuild can bring it back.
+		if [ -n "${TERM[$key]:-}" ]; then
+			parked=true
+			new_att="$RVB_RETRY_MAX"
+		fi
 		pb=$(jqx -c --arg c "$CH" --arg k "$key" --argjson a "$fset" \
 			--argjson att "$new_att" --argjson pk "$parked" --argjson run "$RUN" --arg ts "$NOW" \
 			'.[$c][$k] = {reason:"retry", arches:$a, attempts:$att, parked:$pk, run:$run, ts:$ts}' <<<"$pb")
