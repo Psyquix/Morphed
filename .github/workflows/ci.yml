@@ -128,6 +128,19 @@ jobs:
           EFFECTIVE_BETA: ${{ steps.effective_triggers.outputs.TRIGGER_BETA }}
         run: bash .github/scripts/ci_notify_telegram.sh
 
+      - name: Notify new apps
+        if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
+        # Announce apps newly added to the config on the NullStore topic, separate
+        # from the CI thread. No-op unless ci_detect_config_changes.sh enqueued any
+        # reason:"new" apps this run. Fail-soft like every other notify path.
+        continue-on-error: true
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_NEWAPPS: ${{ vars.TG_THREAD_NEWAPPS }}
+          WEBSITE_LINK: ${{ vars.RELEASE_NOTES_WEBSITE_LINK || 'https://nullcpy.github.io/' }}
+        run: bash .github/scripts/ci_notify_new_apps.sh
+
       - name: Commit updated patch sources and configs
         if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
         # Commits state/*.json + configs/*_build.json to the `data` branch

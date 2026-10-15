@@ -37,6 +37,9 @@ pb=$(retry_load "$PB_FILE")
 bs_orig="$bs"
 pb_orig="$pb"
 trigger=0
+# Apps newly enqueued THIS run (not carried-over retries), per channel, for the
+# "new apps added" notification. Written to new_apps.json at the end.
+newjson='{"stable":[],"beta":[]}'
 
 # to_arr <space-separated tokens> -> sorted, unique JSON array. LC_ALL=C keeps the
 # order byte-stable ("arm-v7a" before "arm64-v8a") regardless of the runner locale.
@@ -92,6 +95,7 @@ process_channel() { # $1=channel $2=config-file
 			if [ "${added:-0}" -gt 0 ]; then
 				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$need" \
 					'.[$c][$k] = {reason:"new", arches:$a, attempts:0, parked:false}' <<<"$pb")
+				newjson=$(jqx -c --arg c "$ch" --arg k "$key" '(.[$c] // []) += [$k]' <<<"$newjson")
 				trigger=1
 			fi
 		else
@@ -130,6 +134,9 @@ fi
 # Pre-extract the non-parked pending keys per channel for the pool generator.
 jqx -c '[.stable | to_entries[] | select(.value.parked != true) | .key]' <<<"$pb" >pending.stable.json
 jqx -c '[.beta | to_entries[] | select(.value.parked != true) | .key]' <<<"$pb" >pending.beta.json
+
+# The apps added THIS run, per channel, for ci_notify_new_apps.sh (empty otherwise).
+printf '%s\n' "$newjson" >new_apps.json
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
 	echo "TRIGGER_CONFIG_CHANGE=$trigger" >>"$GITHUB_OUTPUT"
