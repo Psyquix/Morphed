@@ -37,6 +37,11 @@ state/
   patch_file_hashes.json      source → channel → package → bundle content hash
   build_content_hashes.json   channel → built-artifact key → content md5 (duplicate-build
                               check; written by the build job after a successful upload)
+  built_shape.json            channel → app key → arch list last successfully built (or
+                              seeded at migration); lets the watcher spot new apps/arches
+  pending_builds.json         channel → app key → {reason, arches, attempts, parked}; the
+                              force-built queue for config changes and failed retries
+                              (why: [decisions/0010](decisions/0010-config-change-pending-builds.md))
 ```
 
 - Both directories are ignored on `main` ([.gitignore](../.gitignore)) and exist
