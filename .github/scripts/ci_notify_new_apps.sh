@@ -74,13 +74,21 @@ while IFS= read -r key; do
 	fi
 	name=$(jqx -r --arg k "$key" '.[$k]["app-name"] // $k' "$cfg")
 	brand=$(jqx -r --arg k "$key" '.[$k].brand // empty' "$cfg")
+	variant=$(jqx -r --arg k "$key" '.[$k].variant // empty' "$cfg")
+	subvariant=$(jqx -r --arg k "$key" '.[$k]["sub-variant"] // empty' "$cfg")
 	pkg=$(jqx -r --arg k "$key" '.[$k]["pkg-name"] // empty' "$cfg")
 	psrc=$(jqx -r --arg k "$key" '.[$k]["patches-source"] // empty' "$cfg" | tr -d "\"'" | head -n1 | awk '{print $1}')
 	phost=$(jqx -r --arg k "$key" '.[$k]["patches-source-host"] // "github"' "$cfg" | head -n1 | awk '{print $1}')
 	arch=$(retry_effective_arch "$cfg" "$key" | tr -s '[:space:]' '\n' | LC_ALL=C sort -u | sed '/^$/d' | paste -sd ',' - | sed 's/,/, /g')
 
+	# Parenthetical = every identity part that exists, joined by " • ":
+	# brand, variant, sub-variant (e.g. "Piko • NewX • Material You").
+	label=""
+	for part in "$brand" "$variant" "$subvariant"; do
+		[ -n "$part" ] && label="${label:+${label} • }${part}"
+	done
 	block="📱 $(md_clean "$name")"
-	[ -n "$brand" ] && block+=" ($(md_clean "$brand"))"
+	[ -n "$label" ] && block+=" ($(md_clean "$label"))"
 	[ -n "$psrc" ] && block+="${NL}  ╰ Patches: [$(md_clean "$psrc")]($(host_base "$phost")$(md_clean "$psrc"))"
 	[ -n "$pkg" ] && block+="${NL}  ╰ Package: \`${pkg}\`"
 	block+="${NL}  ╰ Arch: ${arch:-arm-v7a, arm64-v8a} · Channel: ${ch}"
