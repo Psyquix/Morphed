@@ -3674,13 +3674,83 @@ dl_cache_repo() {
 
 
 # -------------------- direct --------------------
-dl_direct() {
-	local url=$1 version=${2// /-} output=$3 arch=$4 _dpi=$5
-	req "$url" "${output}" || return 1
+# A bare file URL states nothing in its text: what it serves is only knowable from the
+# bytes it delivers. So no filename grammar is required of it (it may be a versioned
+# file, or a nameless redirect endpoint such as telegram.org/dl/android/apk whose
+# target changes whenever the vendor ships), and the package name, version and
+# versionCode are read off the artifact itself, exactly as the store sources read them
+# off their pages. `get_direct_resp` performs that read - one fetch, at source
+# selection - and the three getters below only report what it proved. Doing the fetch
+# in the response hook is also what makes a dead or wrong URL a per-source miss (the
+# caller drops this source and tries the next) rather than a failed build.
+# The fetched blob goes into the learned download-link index, so every architecture
+# adopts the same bytes instead of paying one transfer per arch.
+get_direct_resp() { # $1=url
+	local url=$1
+	if [ "$url" = "${__DIRECT_URL__:-}" ] && [ -n "${__DIRECT_VERS__:-}" ]; then
+		return 0
+	fi
+	local probe="${TEMP_DIR}/apks_dl/direct-$(_dlurl_sha "$url").apk"
+	mkdir -p "${TEMP_DIR}/apks_dl" 2>/dev/null || return 1
+	if ! req "$url" "$probe"; then
+		epr "ERROR: Could not download the direct URL '$url'"
+		rm -f "$probe"
+		return 1
+	fi
+	if ! unzip -l "$probe" >/dev/null 2>&1; then
+		epr "ERROR: The direct URL '$url' serves something that is not an APK or bundle (not a zip archive)"
+		rm -f "$probe"
+		return 1
+	fi
+	local p v vc
+	p=$(_meta_field_of "$probe" package) || true
+	v=$(_meta_field_of "$probe" versionName) || true
+	vc=$(_meta_field_of "$probe" versionCode) || true
+	if [ -z "$p" ] || [ -z "$v" ]; then
+		epr "ERROR: No package or version readable from the file at '$url' (aapt read '${p:-none}' / '${v:-none}'); it is not a usable APK"
+		rm -f "$probe"
+		return 1
+	fi
+	if [ -n "${pkg_name:-}" ] && [ "$p" != "$pkg_name" ]; then
+		wpr "The direct URL '$url' serves '$p', not the configured pkg-name '$pkg_name'; dropping it as a source"
+		rm -f "$probe"
+		return 1
+	fi
+	_dlurl_index_record "$url" "$probe"
+	rm -f "$probe"
+	__DIRECT_URL__="$url"
+	__DIRECT_PKG_NAME__="$p"
+	__DIRECT_VERS__="$v"
+	pr "Direct URL '$url' serves '$p' v$v (versionCode ${vc:-unreadable})"
+	return 0
 }
-get_direct_vers() { cut -d- -f2 <<<"$__DIRECT_APKNAME__" | sed 's/\.\(apk\|xapk\|apks\|apkm\)$//'; }
-get_direct_pkg_name() { cut -d- -f1 <<<"$__DIRECT_APKNAME__" | sed 's/\.\(apk\|xapk\|apks\|apkm\)$//'; }
-get_direct_resp() { __DIRECT_APKNAME__=$(awk -F/ '{print $NF}' <<<"$1"); }
+
+dl_direct() {
+	local url=$1 output=$3 arch=$4
+	local _idx=""
+	_idx=$(_dlurl_index_lookup "$url" "$arch") || true
+	if [ "$_idx" = REJECT ]; then
+		wpr "The direct link '$url' is known to serve a different ABI than '$arch'; skipping source without re-download"
+		return 1
+	fi
+	if [ -n "$_idx" ]; then
+		cp -f "$_idx" "$output" || return 1
+		pr "Adopting the already-fetched direct download for '$url' (no re-download)"
+		return 0
+	fi
+	req "$url" "$output" || return 1
+	_dlurl_index_record "$url" "$output"
+}
+# Reported only through get_direct_resp, which read them off the artifact; nothing here
+# parses the URL any more.
+get_direct_vers() {
+	[ -n "${__DIRECT_VERS__:-}" ] || return 1
+	printf '%s\n' "$__DIRECT_VERS__"
+}
+get_direct_pkg_name() {
+	[ -n "${__DIRECT_PKG_NAME__:-}" ] || return 1
+	printf '%s\n' "$__DIRECT_PKG_NAME__"
+}
 # --------------------------------------------------
 
 patch_apk() {
@@ -4876,6 +4946,13 @@ build_rv() {
 			arch_f="${arch// /}"
 			local target_version_code
 			target_version_code=$(parse_arch_mapping "${args[version_code]:-}" "$arch_f")
+			# Whether that code is an order written in the config or merely what the patch
+			# annotation says about a version. A direct link re-keys its artifact to the
+			# bytes it actually got, and only a hand-written pin survives that re-key.
+			local _vc_pinned_by_config=false
+			if [ -n "$target_version_code" ] && [ "$target_version_code" != "auto" ]; then
+				_vc_pinned_by_config=true
+			fi
 			if [ -z "$target_version_code" ] || [ "$target_version_code" = "auto" ]; then
 				target_version_code=""
 				if [ -n "$version" ] && [ -n "$cli_jar" ] && [ -n "$patches_jar" ]; then
@@ -5041,7 +5118,12 @@ build_rv() {
 						# cheaper `dump packagename` - so a badging failure used to slip an
 						# unverified APK into the cache under a version code it never proved.
 						# Apps with no resolved target code never enter this block at all.
-						if [ -n "$target_version_code" ]; then
+						# A direct link is exempt unless the code was written by hand: whatever
+						# code the patches annotated for some other version cannot judge the one
+						# artifact this source is able to serve, and the block below keys the
+						# cache name to the code it reads off these bytes.
+						if [ -n "$target_version_code" ] &&
+							{ [[ "$dl_p" != "direct" ]] || [ "$_vc_pinned_by_config" = true ]; }; then
 							downloaded_vc=$(_meta_field_of "$stock_apk" versionCode) || true
 							if [ -z "$downloaded_vc" ]; then
 								epr "ERROR: Expected version code $target_version_code for '$pkg_name' but aapt read none from the downloaded file (dump badging produced nothing). Rejecting..."
@@ -5084,18 +5166,63 @@ build_rv() {
 							fi
 						fi
 
-						if [ -n "$downloaded_ver" ] && [[ "$dl_p" == "direct" ]]; then
-							if [ "$version" != "$downloaded_ver" ]; then
-								pr "Updating version from '${version}' to '${downloaded_ver}' based on APK info"
+						# A direct URL carries no identity in its text, so its bytes decide it here,
+						# after the package check has proved the artifact and after any hand-pinned
+						# version code has been honoured: the staged file (and the bundle it arrived
+						# in, if any) is re-keyed to the versionName and versionCode read off it, so the
+						# cache name, the upload and the manifest describe what was actually fetched
+						# instead of what the link's filename claimed. Nothing above this point mutates
+						# state when it rejects, and nothing re-keyed here is left behind if the re-key
+						# turns out to be unbuildable: the version can move out from under the
+						# compatibility gate that ran before the download, so that gate is re-run on the
+						# true version, an unsupported live build is never shipped, its fetch is
+						# discarded, and the version-selecting sources are handed the original version
+						# back to serve.
+						if [[ "$dl_p" == "direct" ]] && [ -n "$downloaded_ver" ]; then
+							downloaded_vc=$(_meta_field_of "$stock_apk" versionCode) || true
+							local _d_ver_f=${downloaded_ver// /}
+							_d_ver_f=${_d_ver_f#v}
+							local _d_vc_infix="${downloaded_vc:+-$downloaded_vc}"
+							if [ "$_d_ver_f" != "$version_f" ] || [ "$_d_vc_infix" != "$vc_infix" ]; then
+								local _d_keep_version="$version" _d_keep_version_f="$version_f" \
+									_d_keep_vc_infix="$vc_infix" _d_keep_target="$target_version_code" \
+									_d_keep_all="$all_apk" _d_keep_cached="$cached_stock_apk" \
+									_d_keep_cached_all="$cached_all_apk"
+								pr "Direct URL serves '$pkg_name' v${_d_ver_f}${_d_vc_infix:+ (${downloaded_vc})} instead of v${version_f}${vc_infix}; re-keying the artifact"
+								local _d_new="${apk_dl_dir}/${pkg_name}-${_d_ver_f}${_d_vc_infix}-${arch_f}.apk"
+								if [ "$_d_new" != "$stock_apk" ]; then
+									mv -f "$stock_apk" "$_d_new" 2>/dev/null || true
+									local _d_bext
+									for _d_bext in xapk apkm apks bundle; do
+										if [ -e "${stock_apk%.apk}.${_d_bext}" ]; then
+											mv -f "${stock_apk%.apk}.${_d_bext}" "${_d_new%.apk}.${_d_bext}" 2>/dev/null || true
+										fi
+									done
+									stock_apk="$_d_new"
+								fi
 								version="$downloaded_ver"
-								version_f=${version// /}
-								version_f=${version_f#v}
-								
-								local new_stock_apk="${TEMP_DIR}/${pkg_name}-${version_f}${vc_infix}-${arch_f}.apk"
-								mv "$stock_apk" "$new_stock_apk"
-								stock_apk="$new_stock_apk"
+								version_f="$_d_ver_f"
+								vc_infix="$_d_vc_infix"
+								all_apk="${apk_dl_dir}/${pkg_name}-${version_f}${vc_infix}-all.apk"
 								cached_stock_apk="${apk_cache_dir}/${pkg_name}-${version_f}${vc_infix}-${arch_f}.apk"
 								cached_all_apk="${apk_cache_dir}/${pkg_name}-${version_f}${vc_infix}-all.apk"
+								if [ "$_vc_pinned_by_config" != true ]; then
+									target_version_code="$downloaded_vc"
+								fi
+								if ! has_compatible_patches "$cli_jar" "$patches_jar" "$pkg_name" "$version_f" "${args[cli_source]:-}" "${args[included_patches]:-}"; then
+									wpr "The direct URL's v${version_f} of '$pkg_name' has no compatible patches; dropping the source so the versioned sources can serve v${_d_keep_version_f}"
+									rm -f "$stock_apk" "${stock_apk%.apk}".* "${stock_apk}".*
+									version="$_d_keep_version"
+									version_f="$_d_keep_version_f"
+									vc_infix="$_d_keep_vc_infix"
+									target_version_code="$_d_keep_target"
+									stock_apk="${apk_dl_dir}/${pkg_name}-${version_f}${vc_infix}-${arch_f}.apk"
+									all_apk="$_d_keep_all"
+									cached_stock_apk="$_d_keep_cached"
+									cached_all_apk="$_d_keep_cached_all"
+									args[direct_dlurl]=""
+									continue
+								fi
 							fi
 						fi
 					fi

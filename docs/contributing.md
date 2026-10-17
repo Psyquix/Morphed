@@ -112,7 +112,7 @@ describing it. `bash scripts/build.sh clean` resets.
 | Layer | Command | Notes |
 |---|---|---|
 | Patcher/tool decisions in the engine | `bash .github/traces/trace_runner.sh verify` | offline; stubbed `curl`/`java` + fixtures; runs on push to `build.sh`/`utils.sh`. After an *intentional* argv change: `… capture`, read the diff, commit the goldens |
-| Cache / bundle / patch-version / store-picker helpers | `bash .github/traces/test_cache_helpers.sh`, `bash .github/traces/test_bundle_helpers.sh`, `bash .github/traces/test_patch_versions.sh`, `bash .github/traces/test_apkmirror_variants.sh` | same job |
+| Cache / bundle / patch-version / store-picker / direct-source helpers | `bash .github/traces/test_cache_helpers.sh`, `bash .github/traces/test_bundle_helpers.sh`, `bash .github/traces/test_patch_versions.sh`, `bash .github/traces/test_apkmirror_variants.sh`, `bash .github/traces/test_direct_source.sh` | same job |
 | A CI shell script | a stubbed-binary harness under `temp/` | convention below |
 | Website-facing formats | `rebuild-catalog.yml` with `dry_run: true` | see [website-contract.md](website-contract.md) |
 

@@ -34,3 +34,4 @@ jobs:
           bash .github/traces/test_cache_helpers.sh
           bash .github/traces/test_bundle_helpers.sh
           bash .github/traces/test_apkmirror_variants.sh
+          bash .github/traces/test_direct_source.sh

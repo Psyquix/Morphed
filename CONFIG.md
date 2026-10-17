@@ -101,7 +101,14 @@ github-release-regex = "^Beta"
 # regex used to pick the exact apk file from the github release assets. supports {version} and {arch} string interpolation.
 # you can define a generic regex, or map architectures to specific regexes using 'arch: regex | arch2: regex2'.
 github-regex = "arm64-v8a: 'MyApp-arm64-v{version}\\.apk' | arm-v7a: 'MyApp-arm-v{version}\\.apk'"
-# direct download url. the url must have point to an apk file with name format shown in this example
+# direct download url. Nothing is read out of the URL itself: the link is fetched and
+# the package name, version, versionCode and ABI coverage are taken from the file it
+# serves. So a nameless endpoint that always points at the vendor's current build works
+# as well as a link ending in a versioned filename, and the filename is never trusted.
+# Keep `pkg-name` set: with it, an artifact for any other package is rejected and the
+# source is skipped; without it the downloaded file's own package is what gets patched.
+# When the served version is not one the patch set supports, the direct source is
+# dropped and the version-selecting sources below are asked for the resolved version.
 direct-dlurl = "https://website/com.google.android.youtube-20.40.45-all.apk"
 
 module-prop-name = "some-app-module"                       # module prop name. default: "<app>-<author>"

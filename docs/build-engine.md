@@ -258,7 +258,7 @@ in; the first source that yields a verified artifact **carrying the requested ar
 | # | Source | Notes |
 |---|---|---|
 | 1 | `cache_repo` | `nullcpy/apks` — release per package name, download-only (never used to list versions) → [cache-repo.md](cache-repo.md). No release for the package means it has never been uploaded (every app's first build), which is logged as a cache miss, not as a failed request |
-| 2 | `direct` | a straight file URL in the config |
+| 2 | `direct` | a straight file URL in the config. Its text is never parsed: the link is fetched once at source selection and the package name, version and versionCode are read off the artifact, so a nameless endpoint serving whatever the vendor ships today works as well as a versioned filename. The fetched blob goes into the download-link index, so each arch adopts it instead of re-fetching, and a single-ABI link is refused for another arch |
 | 3 | `github` | release assets, filtered by `github-release-regex` / `github-regex`, arch-mapped |
 | 4 | `archive` | `archive.org` item, the long-term fallback for delisted versions |
 | 5 | `apkmirror` | variant picker ranks the release's rows (see below); package/version read from the HTML |
@@ -268,6 +268,15 @@ in; the first source that yields a verified artifact **carrying the requested ar
 
 Supporting machinery:
 
+- **A direct link's version belongs to the vendor** — the artifact is re-keyed to the
+  version and versionCode read off its bytes *before* the version-code and arch gates
+  judge it, and the patch-compatibility gate is then re-run on that version (the one
+  that ran before the download judged a version the link never served). A live build the
+  patch bundle does not support therefore drops the direct source, discards the fetch,
+  and leaves the version-selecting sources to serve the resolved version
+  ([decisions/0012](decisions/0012-direct-source-identity-comes-from-its-artifact.md));
+  a versionCode written by hand in `version-code` survives as an order and still
+  rejects the artifact.
 - **Anti-bot routing** — a Cloudflare-bypass sidecar (`CF_SOLVER_URL`, the
   `ghcr.io/sarperavci/cloudflarebypassforscraping` service in `build.yml`), asked
   about the **effective URL after redirects**, not the request URL; `curl_cffi`
