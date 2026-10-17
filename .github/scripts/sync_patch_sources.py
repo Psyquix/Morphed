@@ -21,8 +21,9 @@ import urllib.request
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# Sibling module, importable only because of the insert above - keep it after it.
-# isort:skip stops the formatter lifting it back over the path setup.
+# Sibling modules, importable only because of the insert above - keep them after
+# it. isort:skip stops the formatter lifting them back over the path setup.
+import jsonfmt  # isort:skip  # noqa: E402
 import derive_source_changes  # isort:skip  # noqa: E402
 
 try:
@@ -334,22 +335,18 @@ def main():
 
     # Save state files
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(new_state, f, indent=2, sort_keys=True)
+    jsonfmt.write(STATE_FILE, new_state, sort_keys=True)
 
-    with open("tags_old.json", "w", encoding="utf-8") as f:
-        json.dump(old_state, f, indent=2)
+    jsonfmt.write("tags_old.json", old_state)
 
-    with open("tags_new.json", "w", encoding="utf-8") as f:
-        json.dump(new_state, f, indent=2)
+    jsonfmt.write("tags_new.json", new_state)
 
     # One derivation of "what changed", shared by every later step instead of
     # each re-diffing tags_old/tags_new with its own rules. The trigger flags
     # below are read out of these records, so a trigger can never disagree with
     # what ci_check_app_patches.py and ci_generate_configs.sh will act on.
     changed_records = derive_source_changes.derive(old_state, new_state)
-    with open("changed_sources.json", "w", encoding="utf-8") as f:
-        json.dump(changed_records, f, indent=2, sort_keys=True)
+    jsonfmt.write("changed_sources.json", changed_records, sort_keys=True)
     if any(r["channel"] == "stable" for r in changed_records):
         trigger_stable = 1
     if any(r["channel"] == "beta" and r["newer_than_base"] for r in changed_records):

@@ -21,6 +21,11 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Sibling module, importable only because of the insert above - keep it after it.
+# isort:skip stops the formatter lifting it back over the path setup.
+import jsonfmt  # isort:skip  # noqa: E402
+
 OLD_FILE = "tags_old.json"
 NEW_FILE = "tags_new.json"
 OUT_FILE = "changed_sources.json"
@@ -84,8 +89,7 @@ def load_json(path):
 
 def main():
     records = derive(load_json(OLD_FILE), load_json(NEW_FILE))
-    with open(OUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(records, f, indent=2, sort_keys=True)
+    jsonfmt.write(OUT_FILE, records, sort_keys=True)
 
     stable = sorted({r["repo"] for r in records if r["channel"] == "stable"})
     beta_all = sorted({r["repo"] for r in records if r["channel"] == "beta"})

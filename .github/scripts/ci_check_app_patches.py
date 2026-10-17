@@ -8,8 +8,9 @@ import glob
 import urllib.request
 import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# Sibling module, importable only because of the insert above - keep it after it.
-# isort:skip stops the formatter lifting it back over the path setup.
+# Sibling modules, importable only because of the insert above - keep them after
+# it. isort:skip stops the formatter lifting them back over the path setup.
+import jsonfmt  # isort:skip  # noqa: E402
 from patchers import ci_bundle_diffable  # isort:skip  # noqa: E402
 
 
@@ -403,17 +404,14 @@ def run():
             evaluate_repo_channel(repo_lower, repo, channels['beta'], 'beta', new_info,
                                   hashes, active_beta, apps_stable, apps_beta, is_revanced_or_morphe)
 
-    with open(hash_file, 'w') as f:
-        json.dump(hashes, f, indent=2, sort_keys=True)
+    jsonfmt.write(hash_file, hashes, sort_keys=True)
 
     stable_set = list(set(active_stable))
     beta_set = list(set(active_beta))
 
-    with open('active_patch_apps.stable.json', 'w') as f:
-        json.dump(stable_set, f)
+    jsonfmt.write('active_patch_apps.stable.json', stable_set)
 
-    with open('active_patch_apps.beta.json', 'w') as f:
-        json.dump(beta_set, f)
+    jsonfmt.write('active_patch_apps.beta.json', beta_set)
 
     if stable_set or beta_set:
         parts = []

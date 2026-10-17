@@ -165,8 +165,11 @@ fi
 # changed this run, the commit step must fire so the baseline survives.
 if [ "$bs" != "$bs_orig" ] || [ "$pb" != "$pb_orig" ]; then
 	mkdir -p state
-	printf '%s\n' "$bs" >"$BS_FILE"
-	printf '%s\n' "$pb" >"$PB_FILE"
+	# Values are carried compactly in the variables (that is what the comparisons
+	# above are against); only the files get the canonical document layout every
+	# other persisted JSON in this repo uses - see jsonfmt.py.
+	jqx . <<<"$bs" >"$BS_FILE"
+	jqx . <<<"$pb" >"$PB_FILE"
 	[ "$bs" != "$bs_orig" ] && trigger=1
 fi
 

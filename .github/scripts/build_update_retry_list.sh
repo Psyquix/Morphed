@@ -126,8 +126,10 @@ done < <(retry_list_apps "$CFG")
 
 if [ "$bs" != "$bs0" ] || [ "$pb" != "$pb0" ]; then
 	mkdir -p state
-	printf '%s\n' "$bs" >"$BS_FILE"
-	printf '%s\n' "$pb" >"$PB_FILE"
+	# Same split as the watcher: compact in the variables (the comparisons above
+	# read those), canonical document layout in the files - see jsonfmt.py.
+	jqx . <<<"$bs" >"$BS_FILE"
+	jqx . <<<"$pb" >"$PB_FILE"
 	echo "Retry state updated for channel $CH (built_shape + pending_builds)."
 	updated true
 else

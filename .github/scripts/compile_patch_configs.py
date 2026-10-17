@@ -22,6 +22,9 @@ import glob
 import json
 import re
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import jsonfmt  # isort:skip  # noqa: E402
+
 try:
     import tomllib
 except ImportError:
@@ -160,11 +163,9 @@ def main():
     beta_out = {"patches-version": "beta"}
     beta_out.update(beta_pool)
 
-    with open("config.stable.json", "w", encoding="utf-8") as f:
-        json.dump(stable_out, f, indent=2)
+    jsonfmt.write("config.stable.json", stable_out)
 
-    with open("config.beta.json", "w", encoding="utf-8") as f:
-        json.dump(beta_out, f, indent=2)
+    jsonfmt.write("config.beta.json", beta_out)
 
     print("Base patch configurations compiled successfully.")
     print(f"Stable pool apps: {len(stable_pool)}")
