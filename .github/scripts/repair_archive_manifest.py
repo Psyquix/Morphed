@@ -38,6 +38,9 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Sibling modules, importable only because of the insert above - keep them after
+# it. isort:skip stops the formatter lifting them back over the path setup.
+import jsonfmt  # isort:skip  # noqa: E402
 from backfill_manifests import fallback_entry, manifest_entry_from_app  # noqa: E402
 
 SCHEMA_VERSION = 1
@@ -213,8 +216,7 @@ def main():
 
     out_path = Path("temp/manifest") / f"repair-{args.archive}-build.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(
-        manifest, separators=(",", ":")), encoding="utf-8")
+    jsonfmt.write(out_path, manifest)
     print(f"Wrote {out_path}")
 
     if not args.apply:

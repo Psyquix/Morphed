@@ -27,6 +27,7 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import jsonfmt  # isort:skip  # noqa: E402
 from naming import extract_arch, file_prefix as file_prefix_of, normalize_arch  # noqa: E402
 
 
@@ -217,8 +218,7 @@ def main():
             fdir = tmp / re.sub(r"[^A-Za-z0-9._-]", "_", tag)
             fdir.mkdir(parents=True, exist_ok=True)
             fpath = fdir / "build.json"
-            with open(fpath, "w", encoding="utf-8") as fh:
-                json.dump(m, fh, separators=(",", ":"))
+            jsonfmt.write(fpath, m)
             print(f"[{i}/{len(uploads)}] Uploading build.json to {tag} ({len(m['files'])} files)...")
             run_cmd(f'gh release upload "{tag}" "{fpath}" --clobber -R "{args.repo}"')
         print("Backfill complete.")

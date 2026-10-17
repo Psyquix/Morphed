@@ -15,6 +15,9 @@ Usage:
   python3 .github/scripts/seed_website_branch.py --out temp/website-branch
 Env:
   RVB_REPO (default nullcpy/rvb)
+
+Files are laid down in the canonical JSON form (jsonfmt.py), which is also what
+merge_archive_branch.sh keeps them in, so re-seeding never reformats the branch.
 """
 import argparse
 import json
@@ -22,6 +25,11 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Sibling module, importable only because of the insert above - keep it after it.
+# isort:skip stops the formatter lifting it back over the path setup.
+import jsonfmt  # isort:skip  # noqa: E402
 
 
 def run_args(args):
@@ -68,8 +76,7 @@ def main():
             archives += 1
         else:
             dest = out / "manifests" / f"{tag}.json"
-        dest.write_text(json.dumps(
-            manifest, indent=1, separators=(",", ": ")) + "\n", encoding="utf-8")
+        jsonfmt.write(dest, manifest)
         written += 1
 
     print(f"Wrote {written} manifests ({archives} archives) to {out}.")

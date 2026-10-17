@@ -43,6 +43,12 @@ next build rather than permanent.
 site (`data.json`, `.github/**`, docs), which is why a catalog rebuild dispatches
 the Pages deployment explicitly after a successful push.
 
+Branch files are plain pretty-printed JSON documents: 2-space indent, raw UTF-8,
+LF, trailing newline — the form [.github/scripts/jsonfmt.py](../.github/scripts/jsonfmt.py)
+describes and `jq` emits by default, so rvb's shell and Python writers produce the
+same bytes. Whitespace carries nothing: both ends parse the file, so reformatting
+is never a contract change, and a consumer must not read a manifest line-wise.
+
 ## From schema v1 to schema v2
 
 Schema v1 (rvb writes; keys listed in

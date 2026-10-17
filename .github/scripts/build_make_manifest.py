@@ -9,7 +9,7 @@ Env:
     NEXT_VER_CODE   release tag / build number (required)
     IS_PRERELEASE   true -> beta channel, else stable
 Writes:
-    temp/manifest/build.json
+    temp/manifest/build.json  (canonical JSON form, see jsonfmt.py)
 """
 import json
 import os
@@ -18,6 +18,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Sibling modules, importable only because of the insert above - keep them after
+# it. isort:skip stops the formatter lifting them back over the path setup.
+import jsonfmt  # isort:skip  # noqa: E402
 from naming import extract_arch, extract_version, normalize_arch, normalize_key, parse_patch_info  # noqa: E402
 
 
@@ -134,8 +137,7 @@ def main():
     out_dir = Path("temp/manifest")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "build.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, separators=(",", ":"))
+    jsonfmt.write(out_path, manifest)
     print(
         f"Wrote {out_path} with {len(files)} file entries (build {next_ver_code}, channel {channel}).")
 
