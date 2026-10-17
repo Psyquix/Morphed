@@ -194,3 +194,35 @@ arch extraction/normalization). Imported — never copied — by
 across the repo boundary; a change here is live on the site at the next catalogue
 rebuild, so run `rebuild-catalog.yml` with `dry_run: true` before merging one.
 See [docs/decisions/0006](../../docs/decisions/0006-filename-parsing-is-imported-not-mirrored.md).
+
+### `jsonfmt.py`
+The one serialization for every JSON **document** this pipeline persists: the
+`website` branch's `manifests/<tag>.json` and `archive/<channel>.json`, the
+`build.json` release asset, the generated `configs/*_build.json` pools and
+`state/*.json`. Shape: 2-space indent, raw UTF-8 (no `\uXXXX` escapes), LF, one
+trailing newline — deliberately `jq`'s own default output, so the steps that
+already merge through `jq` (`merge_archive_branch.sh`, `build_merge_hashes.sh`,
+`ci_generate_configs.sh`, the retry-state writers) match the Python steps
+byte-for-byte without an extra hop, and a branch diff names the entries that
+changed instead of showing one opaque 400 KB line. Key order stays the object's
+own unless a writer passes `sort_keys=True` (the state files whose consumers
+diff them between runs). Stdlib-only, like `naming.py`. Also a fixer:
+`python3 .github/scripts/jsonfmt.py <file>...` rewrites the ones that drift.
+
+Formatting carries no meaning anywhere on either side of the seam — every
+consumer parses — and nothing fingerprints JSON bytes (`content_hash.py` reads
+APK zip directories, `retry_fingerprint` re-serializes the parsed value), so a
+reformat cannot move the duplicate-build gate or an ADR 0010 re-arm baseline.
+
+Deliberate exceptions: the notify queue is newline-delimited JSON (one compact
+record per line, `notify_enqueue.sh`) and job-scratch projections that only jq
+reads back through `--slurpfile` stay as their writer emits them;
+`update_usage_tracker.py` keeps its own `json.dump` because the same `usage.json`
+is rewritten by `cleanup-apks.py` in the apks repo — those two have to match each
+other, not this repo.
+
+Guard: `temp/test_json_canonical.sh` (Git Bash) drives the real writers in a
+throwaway tree and asks whether the serializer would have to rewrite their
+output. Its negative control is the old compact dump: mutating a writer back to
+`separators=(",", ":")` turns exactly one assertion red — checked by mutation,
+so the green run means something.
