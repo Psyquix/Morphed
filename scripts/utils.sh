@@ -5,7 +5,7 @@ CWD=$(pwd)
 TEMP_DIR="temp"
 BIN_DIR="bin"
 BUILD_DIR="build"
-DL_SRCS=("cache_repo" "direct" "github" "archive" "apkmirror" "uptodown" "apkpure" "apkcombo")
+DL_SRCS=("cache_repo" "direct" "github" "fdroid" "archive" "apkmirror" "uptodown" "apkpure" "apkcombo")
 BUILD_JSON_FILE="build.json"
 PATCH_OUTPUT=""
 
@@ -3243,6 +3243,176 @@ dl_uptodown() {
 	rm -f "$errf"
 	return 1
 }
+
+# -------------------- fdroid --------------------
+# An F-Droid repo publishes one APK per version code under <repo>/<pkg>_<code>.apk and
+# declares the ABIs that file carries instead of splitting per ABI (measured over a
+# 1400-app repo: 2964 released entries, no ABI-suffixed file name, and only two names
+# that deviate from <pkg>_<code>.apk - both author quirks). So this source needs no
+# variant picker: the version code identifies the file, and the arch is judged off the
+# bytes by build_rv's artifact gate like everywhere else.
+#
+# Two URL shapes are accepted, because those are the two things a human can copy out of
+# a browser:
+#   <origin>/[<lang>/]packages/<pkg>   a package page on f-droid.org or on any site
+#                                      running the same web app. Its per-package JSON
+#                                      (GET <origin>/api/v1/packages/<pkg>) lists the
+#                                      recent releases in about 200 bytes, so the repo's
+#                                      own index - 15.8 MB compressed, ~190 MB as JSON
+#                                      there - is never fetched. It carries no ABI list,
+#                                      which is why that column may be empty.
+#   <host>/<path>/repo                 a bare third-party repo root (an author's GitLab
+#                                      pages repo, IzzyOnDroid). Read through
+#                                      index-v1.jar -> index-v1.json, which gives the
+#                                      published file name verbatim plus `nativecode`.
+#                                      Needs `pkg-name`: nothing in a repo root says
+#                                      which app is wanted.
+# Parsed releases are kept as one tab-separated row each:
+#   versionName  versionCode  apkName  arch-tokens("" when the repo does not say)
+__FDROID_URL__="" __FDROID_ORIGIN__="" __FDROID_REPO__="" __FDROID_PKG__="" __FDROID_TABLE__=""
+
+# Split a config URL into repo + package, writing __FDROID_ORIGIN__/__FDROID_REPO__/
+# __FDROID_PKG__ (origin stays empty for the repo-root form, which has no site API to
+# ask). Set as globals rather than echoed for a positional read: a leading empty field
+# does not survive `read`, tab or no tab, and a repo root is exactly the case where the
+# first field is empty.
+_fdroid_split_url() { # $1=url
+	local url=${1%/}
+	__FDROID_ORIGIN__="" __FDROID_REPO__="" __FDROID_PKG__=""
+	case "$url" in
+		*://*/*packages/*)
+			__FDROID_ORIGIN__=$(sed -E 's#^(https?://[^/]+).*#\1#' <<<"$url")
+			__FDROID_REPO__="${__FDROID_ORIGIN__}/repo"
+			__FDROID_PKG__="${url##*/packages/}"
+			;;
+		*://*/*)
+			__FDROID_REPO__="$url"
+			__FDROID_PKG__="${pkg_name:-}"
+			;;
+		*)
+			return 1
+			;;
+	esac
+	[ -n "${__FDROID_REPO__}" ]
+}
+
+get_fdroid_resp() { # $1=url
+	local url="${1%/}" json rows
+	if [ "$url" = "$__FDROID_URL__" ] && [ -n "$__FDROID_TABLE__" ]; then
+		return 0
+	fi
+	_fdroid_split_url "$url" || { epr "ERROR: '$url' is neither an F-Droid package page nor a repo root"; return 1; }
+	if [ -z "$__FDROID_PKG__" ]; then
+		epr "ERROR: '$url' is a bare F-Droid repo, which names no app; set 'pkg-name' in the config"
+		return 1
+	fi
+	rows=""
+	if [ -n "$__FDROID_ORIGIN__" ]; then
+		local api="${__FDROID_ORIGIN__}/api/v1/packages/${__FDROID_PKG__}"
+		# The page form: the site API knows the versions, the grammar names the file.
+		# Guarded because a package the repo does not carry answers 404, which is a
+		# per-source miss like any other and must not abort the app's whole build.
+		if ! json=$(req "$api" -); then
+			epr "ERROR: Could not read the F-Droid package list for '$__FDROID_PKG__' from $api"
+			return 1
+		fi
+		[ -n "$json" ] || { epr "ERROR: F-Droid API returned nothing for '$__FDROID_PKG__' at $api"; return 1; }
+		rows=$(jq -r --arg pkg "$__FDROID_PKG__" '
+			(.packages // [])[]
+			| select(.versionCode != null)
+			| [ ((.versionName // "") | tostring), (.versionCode | tostring),
+			    ($pkg + "_" + (.versionCode | tostring) + ".apk"), "" ]
+			| @tsv' <<<"$json" 2>/dev/null) || rows=""
+	else
+		# The repo form: read the signed index jar the repo publishes.
+		local jar="${TEMP_DIR}/fdroid-index-$(_dlurl_sha "$__FDROID_REPO__").jar" member="" _try
+		mkdir -p "$TEMP_DIR" 2>/dev/null || true
+		for _try in index-v1.jar index.jar; do
+			if req "$__FDROID_REPO__/$_try" "$jar" 2>/dev/null; then
+				for member in index-v1.json index.json; do
+					if json=$(unzip -p "$jar" "$member" 2>/dev/null) && [ -n "$json" ]; then break 2; fi
+				done
+			fi
+			rm -f "$jar"
+			member=""
+		done
+		if [ -z "$member" ]; then
+			epr "ERROR: Could not read an index (index-v1.jar / index.jar) from the F-Droid repo '$__FDROID_REPO__'"
+			rm -f "$jar"
+			return 1
+		fi
+		rows=$(jq -r --arg pkg "$__FDROID_PKG__" '
+			def abis: (.nativecode // []) | map(({"armeabi-v7a": "arm-v7a"}[.]) // .) | join(" ");
+			(.packages[$pkg] // [])[]
+			| select(.apkName != null and .versionCode != null)
+			| [ ((.versionName // "") | tostring), (.versionCode | tostring), .apkName, abis ]
+			| @tsv' <<<"$json" 2>/dev/null) || rows=""
+		json=""
+		rm -f "$jar"
+	fi
+	# Newest release first: several apps ship more than one build per version name.
+	rows=$(sort -t$'\t' -k2,2nr <<<"$rows" | grep . || :)
+	if [ -z "$rows" ]; then
+		epr "ERROR: F-Droid repo '$__FDROID_REPO__' lists no released APK for '$__FDROID_PKG__'"
+		return 1
+	fi
+	__FDROID_URL__="$url"
+	__FDROID_TABLE__="$rows"
+	pr "F-Droid repo '$__FDROID_REPO__' has $(grep -c . <<<"$rows") release(s) of '$__FDROID_PKG__'; newest $(head -1 <<<"$rows" | cut -f1,2 | tr '\t' ' ')"
+	return 0
+}
+
+# Reported only from the table get_fdroid_resp parsed off the repo.
+get_fdroid_vers() {
+	[ -n "$__FDROID_TABLE__" ] || return 1
+	cut -f1 <<<"$__FDROID_TABLE__"
+}
+get_fdroid_pkg_name() {
+	[ -n "$__FDROID_PKG__" ] || return 1
+	printf '%s\n' "$__FDROID_PKG__"
+}
+
+dl_fdroid() { # url version output arch dpi get_latest target_version_code
+	local url="${1%/}" version=$2 output=$3 arch=${4// /} _dpi=$5 latest=$6 target_vc=${7:-}
+	[ "$url" = "$__FDROID_URL__" ] || get_fdroid_resp "$url" || return 1
+	[ -n "$__FDROID_TABLE__" ] || return 1
+
+	# A pinned version code selects the release outright - which is why this source
+	# needs no variant picker - otherwise the version name does, and a name with no
+	# match at all falls to the newest release only when listing latest.
+	local pick=""
+	if [ -n "$target_vc" ]; then
+		pick=$(awk -F'\t' -v c="$target_vc" '$2 == c' <<<"$__FDROID_TABLE__")
+	elif [ -n "$version" ]; then
+		pick=$(awk -F'\t' -v v="$version" '$1 == v' <<<"$__FDROID_TABLE__")
+	fi
+	if [ -z "$pick" ] && [ "$latest" = true ]; then
+		pick=$(head -1 <<<"$__FDROID_TABLE__")
+	fi
+	if [ -z "$pick" ]; then
+		wpr "F-Droid repo '$__FDROID_REPO__' has no release of '$__FDROID_PKG__' matching '$version'${target_vc:+ (code $target_vc)}; skipping source"
+		return 1
+	fi
+
+	# Among the releases that match, take one whose declared ABIs cover the requested
+	# arch. An empty column means the repo does not declare ABIs (the site API), and is
+	# left to build_rv's artifact gate rather than refused here.
+	local row="" abis="" sel=""
+	while IFS= read -r row; do
+		[ -n "$row" ] || continue
+		abis=$(cut -f4 <<<"$row")
+		if [ -z "$abis" ] || _abis_satisfies "$abis" "$arch"; then sel="$row"; break; fi
+	done <<<"$pick"
+	if [ -z "$sel" ]; then
+		wpr "Every F-Droid release of '$__FDROID_PKG__' v${version} excludes the requested '$arch'; skipping source"
+		return 1
+	fi
+
+	local name=$(cut -f1 <<<"$sel") code=$(cut -f2 <<<"$sel") apk=$(cut -f3 <<<"$sel")
+	pr "Downloading '$name' ($code) from F-Droid: $__FDROID_REPO__/$apk"
+	req "$__FDROID_REPO__/$apk" "$output" || return 1
+}
+# --------------------------------------------------
 
 # -------------------- archive --------------------
 dl_archive() {

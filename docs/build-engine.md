@@ -260,14 +260,23 @@ in; the first source that yields a verified artifact **carrying the requested ar
 | 1 | `cache_repo` | `nullcpy/apks` — release per package name, download-only (never used to list versions) → [cache-repo.md](cache-repo.md). No release for the package means it has never been uploaded (every app's first build), which is logged as a cache miss, not as a failed request |
 | 2 | `direct` | a straight file URL in the config. Its text is never parsed: the link is fetched once at source selection and the package name, version and versionCode are read off the artifact, so a nameless endpoint serving whatever the vendor ships today works as well as a versioned filename. The fetched blob goes into the download-link index, so each arch adopts it instead of re-fetching, and a single-ABI link is refused for another arch |
 | 3 | `github` | release assets, filtered by `github-release-regex` / `github-regex`, arch-mapped |
-| 4 | `archive` | `archive.org` item, the long-term fallback for delisted versions |
-| 5 | `apkmirror` | variant picker ranks the release's rows (see below); package/version read from the HTML |
-| 6 | `uptodown` | |
-| 7 | `apkpure` | one link per ABI read off `/downloading/<v>` → `/download/<v>` → `/download`, the page's featured `#download_link` being only one candidate, with the store's own `?versionCode=&nc=` link form as the last resort when a page yields nothing; XAPK handling in `_apkpure_install_xapk` |
-| 8 | `apkcombo` | trusts the served filename over its object key |
+| 4 | `fdroid` | an F-Droid repo: a package page (versions from the site's `api/v1/packages/<pkg>` JSON, file named `<pkg>_<code>.apk`) or a bare repo root (versions, exact file names and declared ABIs read from `index-v1.jar`, falling back to `index.jar`). One APK per version code, so no variant picker; `pkg-name` is required for the repo-root form |
+| 5 | `archive` | `archive.org` item, the long-term fallback for delisted versions |
+| 6 | `apkmirror` | variant picker ranks the release's rows (see below); package/version read from the HTML |
+| 7 | `uptodown` | |
+| 8 | `apkpure` | one link per ABI read off `/downloading/<v>` → `/download/<v>` → `/download`, the page's featured `#download_link` being only one candidate, with the store's own `?versionCode=&nc=` link form as the last resort when a page yields nothing; XAPK handling in `_apkpure_install_xapk` |
+| 9 | `apkcombo` | trusts the served filename over its object key |
 
 Supporting machinery:
 
+- **A repo index is only fetched when it is small** — an F-Droid package page asks the
+  site's per-package JSON (a few hundred bytes) and builds the file name from the
+  `<pkg>_<versionCode>.apk` grammar, because `f-droid.org/repo/index-v1.jar` is 15.8 MB
+  compressed and ~190 MB as JSON. A bare repo root has no such endpoint, so it is read
+  through its own index jar, which also carries the exact published file name and the
+  `nativecode` list — measured over a 1400-app repo: 2964 released entries, no ABI-suffixed
+  file names, and only two names deviating from the grammar (author quirks), which is why
+  the index form never reconstructs a name ([decisions/0013](decisions/0013-an-fdroid-source-asks-the-repo-what-it-publishes.md)).
 - **A direct link's version belongs to the vendor** — the artifact is re-keyed to the
   version and versionCode read off its bytes *before* the version-code and arch gates
   judge it, and the patch-compatibility gate is then re-run on that version (the one

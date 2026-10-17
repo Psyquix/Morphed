@@ -1,0 +1,22 @@
+{
+    "packageName": "com.example.app",
+    "suggestedVersionCode": 212,
+    "packages": [
+        {
+            "versionName": "2.0.0",
+            "versionCode": 200
+        },
+        {
+            "versionName": "2.1.2",
+            "versionCode": 212
+        },
+        {
+            "versionName": "2.1.1",
+            "versionCode": 210
+        },
+        {
+            "versionName": "2.1.1",
+            "versionCode": 211
+        }
+    ]
+}

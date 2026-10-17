@@ -101,6 +101,23 @@ github-release-regex = "^Beta"
 # regex used to pick the exact apk file from the github release assets. supports {version} and {arch} string interpolation.
 # you can define a generic regex, or map architectures to specific regexes using 'arch: regex | arch2: regex2'.
 github-regex = "arm64-v8a: 'MyApp-arm64-v{version}\\.apk' | arm-v7a: 'MyApp-arm-v{version}\\.apk'"
+# F-Droid source. Two URL shapes are accepted, and in both cases the versions come from
+# what the repo publishes - never from guessing at a filename:
+#   package page   https://f-droid.org/en/packages/<pkg>/  - the site's own JSON endpoint
+#                  (<origin>/api/v1/packages/<pkg>) is asked for the releases, and the
+#                  file name is built from F-Droid's grammar, <pkg>_<versionCode>.apk.
+#                  The repo index is not fetched here: it is 15.8 MB compressed.
+#   repo root      https://apt.izzysoft.de/fdroid/repo     - any third-party repo, read
+#                  through its index-v1.jar (falling back to index.jar). This form names
+#                  no app, so `pkg-name` is required with it. It also yields each file's
+#                  exact published name and the ABIs it carries, so a repo whose author
+#                  named a file oddly is still fetched correctly, and a release that does
+#                  not mention the requested arch is skipped before any transfer.
+# One APK per version code: F-Droid ships a universal file and declares its ABIs, so no
+# variant picker applies, and `version-code` selects a specific build outright. Only the
+# ~12 most recent releases are listed by a repo's page/API - an older pinned version has
+# to come from `cache_repo`, `archive` or a repo index.
+fdroid-dlurl = "https://f-droid.org/en/packages/org.fdroid.fdroid/"
 # direct download url. Nothing is read out of the URL itself: the link is fetched and
 # the package name, version, versionCode and ABI coverage are taken from the file it
 # serves. So a nameless endpoint that always points at the vendor's current build works
