@@ -3,10 +3,11 @@
 **Status:** accepted (2026-10-15)
 **Affects:** `.github/scripts/ci_generate_configs.sh`, `ci_trigger_flags.sh`,
 `ci_resolve_triggers.sh`, a new `ci_detect_config_changes.sh`, a new
-`build_update_retry_list.sh`, `state/built_shape.json`,
-`state/pending_builds.json`, the watcher's trigger flags, and the build job's
-data-commit steps. Counterpart to [0003](0003-blocked-patch-sources-are-skipped.md)
-(a blocked source is *skipped*; this record is about what gets *re-queued*).
+`build_update_retry_list.sh`, `retry_lib.sh` (`retry_fingerprint`),
+`state/built_shape.json`, `state/pending_builds.json`, the watcher's trigger flags,
+and the build job's data-commit steps. Counterpart to
+[0003](0003-blocked-patch-sources-are-skipped.md) (a blocked source is *skipped*;
+this record is about what gets *re-queued*).
 
 ## Context
 
@@ -56,8 +57,19 @@ against `built_shape`:
   prune that pending entry (MacroDroid switched `both → arm64-v8a` drops its
   `arm-v7a` retry);
 - a pending `retry` entry whose `attempts` reached the cap is **parked** and not
-  force-enabled, but is **re-armed** (attempts reset) when a natural trigger or a
-  config change touches that app again.
+  force-enabled, but is **re-armed** when the config moves under it. The signal is a
+  `cfg` field on the entry: the SHA-1 of that app's own compiled entry (keys sorted,
+  so reordering a block is not a change) recorded when the entry is written. A pending
+  entry whose `cfg` no longer matches the app's current fingerprint is a different
+  order from the one that failed — new source, new dlurl, new pin — so `attempts`
+  resets and the park lifts. An entry with **no** `cfg` predates the field and has no
+  baseline: it gets one recorded, and only a *parked* one is also re-armed. A live
+  retry must keep its count, or the cap could never be reached and every transient
+  failure would be retried forever — the churn this record exists to stop. The build
+  job merges into the entry rather than replacing it, so an attempt cannot erase the
+  baseline. Natural triggers need no help here: a source release or an app-version
+  move force-enables the app through the normal routing regardless of the pending
+  state, and the entry clears itself on success.
 
 The pending set is a trigger of its own (`TRIGGER_CONFIG_CHANGE`): it feeds
 `ANYTHING_CHANGED`, forces the affected pool to regenerate, and — because
@@ -115,3 +127,11 @@ pruned; cap → parked; re-arm on config change. A **negative control** asserts 
 unchanged config with no failures leaves both files byte-identical, and that an
 empty pending set makes the generated pool identical to today's. See
 `.github/traces/README.md` and [ci-pipelines](../ci-pipelines.md).
+
+The re-arm half is gated permanently by `bash .github/traces/test_config_rearm.sh`
+(a step in `trace-verify.yml`), which drives both scripts in throwaway trees: config
+change re-arms and re-queues; reordered-but-identical config does not; a second run
+on the same config is a byte-identical no-op; a baseline-less *live* retry keeps its
+attempts (the loop guard); a baseline-less *parked* retry is lifted once; an attempt
+written by the build job preserves the fingerprint. Disabling the re-arm or removing
+that guard each fail the suite — checked by mutation.

@@ -36,3 +36,4 @@ jobs:
           bash .github/traces/test_apkmirror_variants.sh
           bash .github/traces/test_direct_source.sh
           bash .github/traces/test_fdroid_source.sh
+          bash .github/traces/test_config_rearm.sh

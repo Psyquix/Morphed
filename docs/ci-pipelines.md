@@ -40,7 +40,7 @@ step's output is the next step's input:
 | Sync Patch Sources | `sync_patch_sources.py` | discovers all `(patches-source, host)` pairs, lists releases on GitHub/GitLab/Codeberg, rewrites `state/patch_sources.json`, prunes sources no config uses, emits `TRIGGER_STABLE`/`TRIGGER_BETA`/`TRIGGER_BLOCKED` and writes `changed_sources.json` |
 | Fetch App Versions | `ci_fetch_app_versions.sh` | scrapes current store versions (honours `"_check_only_listed"` in `state/app_versions.json`) |
 | Compare App Versions | `compare` step | `TRIGGER_APP_UPDATE` when a tracked app moved |
-| Detect config changes | `ci_detect_config_changes.sh` | always runs: diffs the compiled config against `state/built_shape.json`, enqueues new apps/arches and carried-over retries into `state/pending_builds.json`, prunes entries whose app/arch left the config, and emits `TRIGGER_CONFIG_CHANGE` (why: [decisions/0010](decisions/0010-config-change-pending-builds.md)) |
+| Detect config changes | `ci_detect_config_changes.sh` | always runs: diffs the compiled config against `state/built_shape.json`, enqueues new apps/arches and carried-over retries into `state/pending_builds.json`, prunes entries whose app/arch left the config, **re-arms** an entry whose app config changed since it was written (`cfg` fingerprint: attempts reset, park lifted), and emits `TRIGGER_CONFIG_CHANGE` (why: [decisions/0010](decisions/0010-config-change-pending-builds.md)) |
 | Classify triggers | `ci_trigger_flags.sh` | the two questions everyone else asks: `SOURCES_CHANGED`, `ANYTHING_CHANGED` (config change counts toward the latter, never the former) |
 | Check Patch App Updates | `ci_check_app_patches.py` | only when `SOURCES_CHANGED`: downloads the changed bundles and hashes them (`state/patch_file_hashes.json`) to find which apps the new patches actually cover |
 | Generate configs (JSON) | `ci_generate_configs.sh` | only when `ANYTHING_CHANGED`: writes the pool config each channel will build |
@@ -73,7 +73,7 @@ Two design rules worth preserving:
 | …on the beta channel | `TRIGGER_BETA` | beta pool only |
 | An app's own version changed in a tracked store | `TRIGGER_APP_UPDATE` | both pools reconsider membership (beta gated as above) |
 | A source is blocked or unblocked (`404`/`451`/`403` from the forge) | `TRIGGER_BLOCKED` | regenerates membership, so frozen sources drop out and recovered ones return |
-| The config gained a new app or a new architecture, **or** a previously-failed build is still owed a retry | `TRIGGER_CONFIG_CHANGE` (non-parked pending list) | pool regenerates with the pending apps force-enabled, and the build runs even though no source or version moved (why: [decisions/0010](decisions/0010-config-change-pending-builds.md)) |
+| The config gained a new app or a new architecture, **or** a previously-failed build is still owed a retry, **or** an app's own config changed under a parked entry (re-arm) | `TRIGGER_CONFIG_CHANGE` (non-parked pending list) | pool regenerates with the pending apps force-enabled, and the build runs even though no source or version moved (why: [decisions/0010](decisions/0010-config-change-pending-builds.md)) |
 | Nothing moved | all `0` | no config write, no notification, no build |
 
 A blocked source is **skipped**, not retried: neither a retry nor a live listing
@@ -158,7 +158,10 @@ Step order, with the reason each is where it is:
    attempted app/arch with no failure record is recorded as built and cleared from
    the pending list, a failed arch still requested is re-queued as a retry and
    parked once it hits `RVB_RETRY_MAX`, and `_np` (no-patch) records are not retried
-   because the bundle updating re-triggers the app anyway. A dedicated commit step
+   because the bundle updating re-triggers the app anyway. The entry is merged, not
+   replaced, so the watcher's `cfg` fingerprint survives the attempt — dropping it
+   would make every run look like a config change and re-arm the app forever. A
+   dedicated commit step
    pushes the two files to `data`. The watcher reads them next run to force-enable
    the queue (step 7c of `check_patch`, [above](#the-watcher-ciyml)).
 7c. **Check whether anything needs publishing** (`build_check_no_change.sh`):

@@ -14,7 +14,13 @@
 #     prune it from the pending list (MacroDroid both -> arm64-v8a drops its
 #     arm-v7a retry).
 #   * a pending entry already recorded by the build job (reason "retry") is left
-#     alone - attempts/parked belong to the build job - except for arch pruning.
+#     alone as to its budget - attempts/parked belong to the build job - except for
+#     arch pruning, and except for the re-arm: when the app's OWN compiled entry
+#     changed since the entry was written (its `cfg` fingerprint differs), the
+#     maintainer has acted on the thing that failed, so attempts reset to 0 and a
+#     parked entry is queued again (ADR 0010). An entry with no `cfg` predates the
+#     field: it gets a baseline recorded, and only a parked one is also re-armed,
+#     so a live retry never loses its count to a missing baseline.
 #
 # Cold start: built_shape is empty the first time this runs after the feature
 # lands. Without a guard every app would look "new" and the whole pool would be
@@ -56,7 +62,7 @@ process_channel() { # $1=channel $2=config-file
 	local ch=$1 cfg=$2
 	[ -f "$cfg" ] || return 0
 
-	local apps cfg_count bs_count first_run key want want_arr bs_arr pend_json pend_arches kept need added
+	local apps cfg_count bs_count first_run key want want_arr bs_arr pend_json pend_arches kept need added fp rearmed
 	apps=$(retry_list_apps "$cfg")
 	cfg_count=$(printf '%s\n' "$apps" | grep -c . || true)
 	bs_count=$(jqx -r --arg c "$ch" '(.[$c] // {}) | length' <<<"$bs")
@@ -93,8 +99,9 @@ process_channel() { # $1=channel $2=config-file
 			need=$(jqx -cn --argjson want "$want_arr" --argjson have "$bs_arr" '$want - $have')
 			added=$(jqx -r 'length' <<<"$need")
 			if [ "${added:-0}" -gt 0 ]; then
-				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$need" \
-					'.[$c][$k] = {reason:"new", arches:$a, attempts:0, parked:false}' <<<"$pb")
+				fp=$(retry_fingerprint "$cfg" "$key")
+				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$need" --arg fp "$fp" \
+					'.[$c][$k] = {reason:"new", arches:$a, attempts:0, parked:false, cfg:$fp}' <<<"$pb")
 				newjson=$(jqx -c --arg c "$ch" --arg k "$key" '(.[$c] // []) += [$k]' <<<"$newjson")
 				trigger=1
 			fi
@@ -108,6 +115,38 @@ process_channel() { # $1=channel $2=config-file
 			elif [ "$kept" != "$pend_arches" ]; then
 				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$kept" '.[$c][$k].arches = $a' <<<"$pb")
 				trigger=1
+			fi
+			# Re-arm (ADR 0010): the entry describes an order placed under a previous
+			# config, so ask whether that config still exists. Three cases, and only two
+			# of them touch a budget:
+			#   `cfg` differs from this app's current fingerprint -> the config moved (a
+			#   new source, dlurl or pin), so what failed is not what is being asked for:
+			#   attempts reset and the park lifts.
+			#   `cfg` absent -> the entry predates the fingerprint. Record it, and lift a
+			#   PARKED entry once (a decision the pipeline gave up on gets one fresh
+			#   chance now that the engine changed). A live entry keeps its count: were
+			#   it reset here, the cap could never be reached and every failure would
+			#   retry forever - the exact churn this mechanism exists to stop.
+			#   unchanged -> no write at all, so the state file stays byte-identical.
+			fp=$(retry_fingerprint "$cfg" "$key")
+			rearmed=$(jqx -c --arg c "$ch" --arg k "$key" --arg fp "$fp" '
+				if (.[$c][$k] // null) == null then .
+				elif (.[$c][$k].cfg // "") == "" then
+					if .[$c][$k].parked == true then
+						.[$c][$k] |= (.attempts = 0 | .parked = false | .cfg = $fp)
+					else .[$c][$k].cfg = $fp end
+				elif .[$c][$k].cfg != $fp then
+					.[$c][$k] |= (.attempts = 0 | .parked = false | .cfg = $fp)
+				else . end' <<<"$pb")
+			if [ "$rearmed" != "$pb" ]; then
+				# Only a budget change is a reason to build; recording a baseline is
+				# bookkeeping the commit step can carry without starting a run.
+				if [ "$(jqx -c --arg c "$ch" --arg k "$key" '.[$c][$k] | {attempts, parked}' <<<"$pb")" != \
+					"$(jqx -c --arg c "$ch" --arg k "$key" '.[$c][$k] | {attempts, parked}' <<<"$rearmed")" ]; then
+					echo "Re-armed '$key' ($ch): its config changed since this entry was written (attempts reset, park lifted)."
+					trigger=1
+				fi
+				pb=$rearmed
 			fi
 		fi
 	done <<<"$apps"

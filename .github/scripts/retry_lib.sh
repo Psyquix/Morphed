@@ -105,6 +105,19 @@ retry_to_arr() {
 	fi
 }
 
+# retry_fingerprint <config-file> <app-key> — a stable hash of one app's own
+# compiled entry: what the config says about that app, and nothing else. The
+# watcher stores it on a pending entry (`cfg`) so the next run can tell "the
+# maintainer changed this app's config" from "the same config failed again" —
+# ADR 0010's re-arm. Keys are sorted first, because the base compiler emits the
+# author's key order verbatim and merely reordering a TOML block is not a change
+# worth spending a retry budget on.
+retry_fingerprint() {
+	local cfg=${1:-} key=${2:-} body
+	body=$(jqx -c --arg k "$key" '(.[$k] // {}) | to_entries | sort_by(.key) | from_entries' "$cfg") || body=""
+	printf '%s' "$body" | sha1sum | cut -d' ' -f1
+}
+
 # retry_app_base <app-label> <arch> — the config table name with the engine's
 # " (<arch>)" build suffix removed, so per-arch failure records regroup under one
 # key. Only the exact " (<arch>)" suffix is stripped.

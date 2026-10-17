@@ -113,9 +113,14 @@ while IFS= read -r key; do
 			parked=true
 			new_att="$RVB_RETRY_MAX"
 		fi
+		# Merge, never replace: the watcher's `cfg` fingerprint has to survive an
+		# attempt, because it is the baseline the next run compares against. Rebuilding
+		# the object here would drop it, the watcher would read the entry as one that
+		# predates the field, and every run would re-arm it - the exact churn the park
+		# exists to prevent.
 		pb=$(jqx -c --arg c "$CH" --arg k "$key" --argjson a "$fset" \
 			--argjson att "$new_att" --argjson pk "$parked" --argjson run "$RUN" --arg ts "$NOW" \
-			'.[$c][$k] = {reason:"retry", arches:$a, attempts:$att, parked:$pk, run:$run, ts:$ts}' <<<"$pb")
+			'.[$c][$k] = ((.[$c][$k] // {}) + {reason:"retry", arches:$a, attempts:$att, parked:$pk, run:$run, ts:$ts})' <<<"$pb")
 	fi
 done < <(retry_list_apps "$CFG")
 
