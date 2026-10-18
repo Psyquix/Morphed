@@ -8,7 +8,10 @@
 # acceptance here is paired with the refusal that makes it mean something: an
 # unchanged config must NOT re-arm, a reordered-but-identical block must NOT re-arm,
 # a re-armed entry must NOT re-arm again on the next run, and an app that left the
-# config must lose its queue entry while its built_shape memory stays.
+# config must lose its queue entry while its built_shape memory stays. The cases from
+# 13 on belong to ADR 0014: a tracked config field must wake an app that is already
+# built, a transport field must not, and a missing baseline must record itself
+# silently rather than force-rebuild the pool.
 #
 # Drives the real watcher script (no stubs): it reads config.stable.json /
 # config.beta.json and state/*.json from its cwd, so each case runs in its own
@@ -38,7 +41,8 @@ run_case() {
 	) || fail "$name: ci_detect_config_changes.sh exited non-zero"
 	OUT_TRIGGER=$(sed -n 's/^TRIGGER_CONFIG_CHANGE=//p' "$CASE/gho" | tail -1)
 	OUT_PENDING=$(cat "$CASE/pending.stable.json" 2>/dev/null || echo '[]')
-	OUT_NEWAPPS=$(cat "$CASE/new_apps.json" 2>/dev/null || echo '{}')
+	OUT_NEWAPPS=$(cat "$CASE/new_apps.json" 2> /dev/null || echo '{}')
+	OUT_CHANGED=$(cat "$CASE/changed_apps.json" 2> /dev/null || echo '{}')
 	OUT_STATE=$(cat "$CASE/state/pending_builds.json")
 	OUT_STATE2=$(cat "$CASE/state/built_shape.json")
 	OUT_LOG=$(cat "$CASE/log")
@@ -222,16 +226,92 @@ printf '%s\n' '{"patches-version":"beta"}' >"$RES/configs/beta_build.json"
 ok_12b=1
 
 # --- 13. re-enabling a disabled app is not a build request on its own -----------
-# Disabling pruned its queue entry, and the memory survived, so the app comes back
-# with every requested arch already recorded as built: nothing to enqueue, nothing
-# to announce and no state file to rewrite. The paired case above is what makes
-# this mean something — without the memory the app would read as brand new.
+# Disabling pruned its queue entry, and the baseline survived, so the app comes back
+# with every requested arch and every tracked field already recorded as built:
+# nothing to enqueue, nothing to announce, no state file to rewrite. The paired case
+# below is what makes this mean something — without the baseline the app would read
+# as untracked and the run would have to guess.
+BASE_MAP=$(printf '%s\n' "$STABLE_CFG" >"$t/base.json" && retry_effective_cfg "$t/base.json" "App-x")
+[ -n "$BASE_MAP" ] || fail "tracked-map helper returned nothing"
+SEED_X="{\"stable\":{\"App-x\":{\"arches\":[\"arm-v7a\",\"arm64-v8a\"],\"cfg\":$BASE_MAP}},\"beta\":{}}"
 run_case reenable_without_change \
-	"$STABLE_CFG" '{"stable":{},"beta":{}}' \
-	'{"stable":{"App-x":["arm-v7a","arm64-v8a"]},"beta":{}}'
+	"$STABLE_CFG" '{"stable":{},"beta":{}}' "$SEED_X"
 [[ "$OUT_TRIGGER" == "0" ]] || fail "case13 rewrote state it had no reason to write"
 [[ "$OUT_PENDING" == "[]" ]] || fail "case13 queued an unchanged re-enable: $OUT_PENDING"
 [[ "$OUT_NEWAPPS" == '{"stable":[],"beta":[]}' ]] || fail "case13 announced it as new: $OUT_NEWAPPS"
+[[ "$(jqx -c . <<<"$OUT_CHANGED")" == '{"stable":{},"beta":{}}' ]] ||
+	fail "case13 announced a change: $OUT_CHANGED"
 [[ -n "${ok_12b:-}" ]] || fail "case12b did not run"
+
+# --- 14. an entry with no baseline records one and asks for NOTHING -------------
+# This is the polarity that makes the comparison safe to deploy before the one-shot
+# seed exists: guessing from the current config would forgive every edit published
+# first, and treating the gap as new would force-rebuild the whole pool.
+run_case legacy_records_silently \
+	"$STABLE_CFG" '{"stable":{},"beta":{}}' \
+	'{"stable":{"App-x":["arm-v7a","arm64-v8a"]},"beta":{}}'
+[[ "$OUT_PENDING" == "[]" ]] || fail "case14 force-built an untracked app: $OUT_PENDING"
+[[ "$OUT_NEWAPPS" == '{"stable":[],"beta":[]}' ]] || fail "case14 announced the record as new"
+[[ "$(jqx -c . <<<"$OUT_CHANGED")" == '{"stable":{},"beta":{}}' ]] ||
+	fail "case14 announced a change: $OUT_CHANGED"
+[[ "$(jqx -c '.stable["App-x"].arches' <<<"$OUT_STATE2")" == '["arm-v7a","arm64-v8a"]' ]] ||
+	fail "case14 the arch memory was lost on conversion: $OUT_STATE2"
+[[ "$(jqx -c '.stable["App-x"].cfg' <<<"$OUT_STATE2")" == "$BASE_MAP" ]] ||
+	fail "case14 no baseline stored: $OUT_STATE2"
+[[ "$OUT_TRIGGER" == "1" ]] || fail "case14 the baseline would never reach data"
+
+# --- 15. build-mode widened: enqueued as a config change, with the diff ---------
+CFG_BOTH=$(printf '%s\n' "$STABLE_CFG" | jqx -c '.["App-x"]["build-mode"] = "both"')
+run_case mode_widens "$CFG_BOTH" '{"stable":{},"beta":{}}' "$SEED_X"
+[[ "$OUT_PENDING" == '["App-x"]' ]] || fail "case15 not queued: $OUT_PENDING"
+[[ "$(jqx -r '.stable["App-x"].reason' <<<"$OUT_STATE")" == "config" ]] ||
+	fail "case15 wrong reason: $OUT_STATE"
+[[ "$OUT_NEWAPPS" == '{"stable":[],"beta":[]}' ]] ||
+	fail "case15 announced a re-build as a NEW app: $OUT_NEWAPPS"
+[[ "$(jqx -c '.stable["App-x"]' <<<"$OUT_CHANGED")" == \
+	'[{"field":"build-mode","from":"apk","to":"both"}]' ]] ||
+	fail "case15 no field diff announced: $OUT_CHANGED"
+grep -q "Config change for 'App-x'" <<<"$OUT_LOG" || fail "case15: not logged: $OUT_LOG"
+# the baseline must NOT advance: only a build that produced artifacts may do that
+[[ "$(jqx -c '.stable["App-x"].cfg["build-mode"]' <<<"$OUT_STATE2")" == '"apk"' ]] ||
+	fail "case15 the watcher credited a build that has not happened: $OUT_STATE2"
+
+# --- 16. build-mode narrowed: nothing to build, so nothing asked ----------------
+MAP_BOTH=$(printf '%s\n' "$BASE_MAP" | jqx -c '.["build-mode"] = "both"')
+run_case mode_narrows "$STABLE_CFG" '{"stable":{},"beta":{}}' \
+	"{\"stable\":{\"App-x\":{\"arches\":[\"arm-v7a\",\"arm64-v8a\"],\"cfg\":$MAP_BOTH}},\"beta\":{}}"
+[[ "$OUT_PENDING" == "[]" ]] || fail "case16 rebuilt a narrowing: $OUT_PENDING"
+[[ "$OUT_TRIGGER" == "0" ]] || fail "case16 moved state it had no reason to move"
+[[ "$(jqx -c . <<<"$OUT_CHANGED")" == '{"stable":{},"beta":{}}' ]] ||
+	fail "case16 announced a narrowing: $OUT_CHANGED"
+
+# --- 17. a dlurl edit is transport, not a build request --------------------------
+CFG_DL=$(printf '%s\n' "$STABLE_CFG" | jqx -c '.["App-x"]["apkmirror-dlurl"] = "https://www.apkmirror.com/apk/other/app"')
+run_case dlurl_edit "$CFG_DL" '{"stable":{},"beta":{}}' "$SEED_X"
+[[ "$OUT_PENDING" == "[]" ]] || fail "case17 rebuilt for a transport edit: $OUT_PENDING"
+[[ "$OUT_TRIGGER" == "0" ]] || fail "case17 a transport edit moved state: $OUT_TRIGGER"
+
+# --- 18. a patch-source move is a build request, and says which field ------------
+MAP_SRC=$(printf '%s\n' "$BASE_MAP" | jqx -c '.["patches-source"] = "someone-else/patches"')
+run_case source_moves "$STABLE_CFG" '{"stable":{},"beta":{}}' \
+	"{\"stable\":{\"App-x\":{\"arches\":[\"arm-v7a\",\"arm64-v8a\"],\"cfg\":$MAP_SRC}},\"beta\":{}}"
+[[ "$OUT_PENDING" == '["App-x"]' ]] || fail "case18 not queued: $OUT_PENDING"
+[[ "$(jqx -r '.stable["App-x"] | map(.field) | index("patches-source") != null' <<<"$OUT_CHANGED")" == "true" ]] ||
+	fail "case18 the source move is not in the announcement: $OUT_CHANGED"
+
+# --- 19. the classification is complete over what CONFIG.md documents -----------
+# Without this, a key added to the docs (or a TOML) silently joins the class of
+# "edits a maintainer expects to cost a build that cost nothing" — which is exactly
+# the bug being fixed here, one level up.
+unclassified=""
+while IFS= read -r k; do
+	[ -z "$k" ] && continue
+	if retry_tracked_key "$k" || retry_ignored_key "$k"; then
+		continue
+	fi
+	unclassified="${unclassified:+${unclassified} }${k}"
+done < <(sed -n 's/^\([a-z][a-z0-9_-]*\)[[:space:]]*=.*$/\1/p' "$REPO/CONFIG.md" | sort -u)
+[ -z "$unclassified" ] ||
+	fail "CONFIG.md documents keys that are neither tracked nor ignored: $unclassified"
 
 echo "CONFIG RE-ARM TESTS: PASS"

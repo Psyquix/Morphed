@@ -40,7 +40,7 @@ step's output is the next step's input:
 | Sync Patch Sources | `sync_patch_sources.py` | discovers all `(patches-source, host)` pairs, lists releases on GitHub/GitLab/Codeberg, rewrites `state/patch_sources.json`, prunes sources no config uses, emits `TRIGGER_STABLE`/`TRIGGER_BETA`/`TRIGGER_BLOCKED` and writes `changed_sources.json` |
 | Fetch App Versions | `ci_fetch_app_versions.sh` | scrapes current store versions (honours `"_check_only_listed"` in `state/app_versions.json`) |
 | Compare App Versions | `compare` step | `TRIGGER_APP_UPDATE` when a tracked app moved |
-| Detect config changes | `ci_detect_config_changes.sh` | always runs: diffs the compiled config against `state/built_shape.json`, enqueues new apps/arches and carried-over retries into `state/pending_builds.json`, prunes queue entries whose app/arch left the config (the `built_shape` memory is kept, so re-enabling an app is not a new build request), **re-arms** an entry whose app config changed since it was written (`cfg` fingerprint: attempts reset, park lifted), and emits `TRIGGER_CONFIG_CHANGE` — which means "the watcher's state moved", not "build this": it is the only signal that gets `state/*.json` committed to `data`, and whether a run starts is decided downstream by the enabled-app count in the pool (why: [decisions/0010](decisions/0010-config-change-pending-builds.md)) |
+| Detect config changes | `ci_detect_config_changes.sh` | always runs: diffs the compiled config against `state/built_shape.json` — its arch set **and** each app's tracked config map — enqueues new apps/arches (`reason: new`), apps whose tracked config moved (`reason: config`, with the field diff written to `changed_apps.json`) and carried-over retries into `state/pending_builds.json`, prunes queue entries whose app/arch left the config (the `built_shape` memory is kept, so re-enabling an app is not a new build request), **re-arms** an entry whose app config changed since it was written (`cfg` fingerprint: attempts reset, park lifted), and emits `TRIGGER_CONFIG_CHANGE` — which means "the watcher's state moved", not "build this": it is the only signal that gets `state/*.json` committed to `data`, and whether a run starts is decided downstream by the enabled-app count in the pool (why: [decisions/0010](decisions/0010-config-change-pending-builds.md), [0014](decisions/0014-config-changes-that-earn-a-rebuild.md)) |
 | Classify triggers | `ci_trigger_flags.sh` | the two questions everyone else asks: `SOURCES_CHANGED`, `ANYTHING_CHANGED` (config change counts toward the latter, never the former) |
 | Check Patch App Updates | `ci_check_app_patches.py` | only when `SOURCES_CHANGED`: downloads the changed bundles and hashes them (`state/patch_file_hashes.json`) to find which apps the new patches actually cover |
 | Generate configs (JSON) | `ci_generate_configs.sh` | only when `ANYTHING_CHANGED`: writes the pool config each channel will build |
@@ -158,7 +158,9 @@ Step order, with the reason each is where it is:
 7b2. **Reconcile pending-build state** (`build_update_retry_list.sh`,
    `if: !cancelled()`): reads the same `temp/failures/` records and updates
    `state/built_shape.json` + `state/pending_builds.json` for this channel — an
-   attempted app/arch with no failure record is recorded as built and cleared from
+   attempted app/arch with no failure record is recorded as built, its tracked config
+   map stamped from the pool it just built (the baseline only advances when something
+   shipped, so a failed rebuild cannot forgive the edit), and is cleared from
    the pending list, a failed arch still requested is re-queued as a retry and
    parked once it hits `RVB_RETRY_MAX`, and `_np` (no-patch) records are not retried
    because the bundle updating re-triggers the app anyway. The entry is merged, not

@@ -41,8 +41,12 @@ state/
                               successful upload, and cleanup trims the kinds it can no
                               longer find on a release). A bare md5 value is a
                               kinds-unknown legacy entry and suppresses nothing.
-  built_shape.json            channel → app key → arch list last successfully built (or
-                              seeded at migration); lets the watcher spot new apps/arches
+  built_shape.json            channel → app key → {arches, cfg}: the arches AND the tracked
+                              config fields the last successful build was produced from
+                              (a bare arch list is a pre-0014 entry — no baseline, so it
+                              records itself and builds nothing). Lets the watcher spot
+                              new apps/arches and the config edits that earn a rebuild
+                              (why: [decisions/0014](decisions/0014-config-changes-that-earn-a-rebuild.md))
   pending_builds.json         channel → app key → {reason, arches, attempts, parked}; the
                               force-built queue for config changes and failed retries
                               (why: [decisions/0010](decisions/0010-config-change-pending-builds.md))

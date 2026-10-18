@@ -141,6 +141,36 @@ enable-module-update = true
 dpi = "360-480dpi"                                         # apkmirror variant filter: rows whose `Screen DPI` column is listed here are preferred, 'auto' accepts whatever else the release has. Among the rows that pass arch/versionCode/dpi, the lowest `Minimum Version` wins so the build installs on the oldest device, then the widest architecture coverage. default: nodpi anydpi auto
 ```
 
+## Which Config Edits Cost a Rebuild
+
+An app is rebuilt when something that changes **what an artifact is built from, or
+whether it is built at all** moved since its last successful build — or when its patch
+source publishes a release, or its own version moves on a store. What each app was
+last built from is recorded per app in `state/built_shape.json` (why:
+[docs/decisions/0014](docs/decisions/0014-config-changes-that-earn-a-rebuild.md)).
+
+- **Editing these rebuilds the app:** `patches-source`, `patches-source-host`,
+  `patches-version`, `patch-folder`, `cli-source`, `cli-source-host`, `cli-version`,
+  `brand`, `variant`, `sub-variant`, `app-name`, `pkg-name`, `patched-pkg-name`,
+  `included-patches`, `excluded-patches`, `exclusive-patches`, `inclusive-patches`,
+  `patcher-args`, `arch`, `build-mode`, `version`, `version-code`,
+  `override-version-code`, `dpi`, `include-stock`, `compression-level`,
+  `compress-module-files`, `remove-rv-integrations-checks`, the `mount-*` keys,
+  `fdroid-index`, `github-release-regex`, `github-regex`, `module-prop-name`,
+  `enable-module-update`.
+- **Editing these does not:** any `*-dlurl` — they choose *where* the same artifact is
+  fetched from, and if a store ever serves different bytes the build's own content
+  fingerprint says so on the next real build; `enabled` — turning an app off retires
+  its queued retry, turning it back on rebuilds nothing unless a field above also
+  moved; `author` and `author-page` — read from a file's top-level defaults only, never
+  from an app block; `use-prebuilt-apks` — local builds.
+- **`build-mode` and `arch` count only when they widen.** Asking for fewer artifacts
+  than the last build produced queues nothing: no rebuild can un-publish what is
+  already on the release.
+
+A rebuild caused by your edit is announced with the field that moved
+(`build-mode: apk → both`), so a config change is never followed by silence.
+
 ### Naming & Catalog Hierarchy
 
 The declarative keys define both the asset filename and how the app appears in release notes and the website catalog:

@@ -44,6 +44,7 @@ document.
 | [0011](0011-version-code-fallback-to-arch.md) | A pinned version code is a preference; the arch wins when the bundle is wrong | `dl_apkmirror`, `build_rv` re-key, `temp/failures/*` `vc_fallback`, retry parking |
 | [0012](0012-direct-source-identity-comes-from-its-artifact.md) | A direct source's identity comes from its artifact, not its URL | `direct-dlurl`, `get_direct_resp`, `dl_direct`, `build_rv` re-key and compatibility re-check |
 | [0013](0013-an-fdroid-source-asks-the-repo-what-it-publishes.md) | An F-Droid source asks the repo what it publishes | `fdroid-dlurl`, `get_fdroid_resp`, `dl_fdroid`, `DL_SRCS` order, F-Droid fixtures |
+| [0014](0014-config-changes-that-earn-a-rebuild.md) | Only a config change that earns an artifact may force a rebuild | `retry_tracked_keys`, `state/built_shape.json` `{arches, cfg}`, `reason: "config"`, `changed_apps.json`, `state/build_content_hashes.json` `{hash, kinds}`, `check_duplicate_build` |
 
 Candidates still unwritten, because the reasoning currently lives only in commit
 messages: pinning a patch source's `patches-version` to a tag vs resolving the

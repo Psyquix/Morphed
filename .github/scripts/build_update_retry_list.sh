@@ -7,8 +7,9 @@
 #
 #   * an attempted (enabled) app/arch with NO failure record succeeded (or was
 #     dedup-suppressed as already-good): merge its arches into built_shape so the
-#     watcher stops treating it as "new", and drop those arches from its pending
-#     entry (deleting the entry once nothing is left to build).
+#     watcher stops treating it as "new", stamp the tracked config it built from, and
+#     drop those arches from its pending entry (deleting the entry once nothing is
+#     left to build).
 #   * an attempted app/arch that DID fail and is still requested: record it in
 #     pending_builds as reason "retry" with attempts + 1, parking it once it has
 #     hit RVB_RETRY_MAX so a genuinely-unbuildable arch stops being retried every
@@ -93,9 +94,19 @@ while IFS= read -r key; do
 	# remember attempts before we touch the entry
 	prev_att=$(jqx -r --arg c "$CH" --arg k "$key" '(.[$c][$k].attempts // 0)' <<<"$pb")
 
-	# merge successes into built_shape, then drop them from pending
-	bs=$(jqx -c --arg c "$CH" --arg k "$key" --argjson s "$succ" \
-		'.[$c][$k] = (((.[$c][$k] // []) + $s) | unique)' <<<"$bs")
+	# Merge successes into built_shape, then drop them from pending. The entry is
+	# {arches, cfg}: the tracked fields of the config this build actually produced
+	# artifacts from, recorded only when something shipped. A build that failed every
+	# arch must not advance the baseline — that would forgive the very edit the
+	# maintainer made and let the watcher stop asking for it, while the failure leaves
+	# a retry entry that already keeps the app queued (why: decisions/0014).
+	if [ "$(jqx -r 'length' <<<"$succ")" -gt 0 ]; then
+		wmap=$(retry_effective_cfg "$CFG" "$key")
+		bs=$(jqx -c --arg c "$CH" --arg k "$key" --argjson s "$succ" --argjson m "$wmap" '
+			(.[$c][$k] // []) as $old
+			| ($old | if type == "object" then (.arches // []) else . end) as $had
+			| .[$c][$k] = ((($had + $s) | unique) as $a | {arches: $a, cfg: $m})' <<<"$bs")
+	fi
 	pb=$(jqx -c --arg c "$CH" --arg k "$key" --argjson s "$succ" '
 		if .[$c][$k] then
 			.[$c][$k].arches = ((.[$c][$k].arches // []) - $s)

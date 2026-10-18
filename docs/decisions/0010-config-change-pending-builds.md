@@ -43,9 +43,15 @@ side of the pipeline.
   list`: the shape of the config the last *successful* build of each app was
   produced from. This is the memory that makes "new" and "arch removed"
   computable, and it is what keeps a new app from being re-flagged every run.
+  The arch list was the whole record only while "shape" meant "arches"; an entry
+  now also carries the tracked config its last build was produced from, because
+  arch equality is not config equality
+  ([0014](0014-config-changes-that-earn-a-rebuild.md)).
 - **`state/pending_builds.json`** — per channel, `app key → {reason, arches,
   attempts, parked, run, ts}`, `reason ∈ {new, retry}`: the union of "build this
-  because the config changed" and "build this again because it failed".
+  because the config changed" and "build this again because it failed". A third
+  reason, `config`, was added when "the config changed" stopped meaning "an arch
+  appeared" ([0014](0014-config-changes-that-earn-a-rebuild.md)).
 
 **Watcher** (`ci_detect_config_changes.sh`, after base configs compile and before
 trigger classification) diffs the compiled config's effective `(app → arch set)`

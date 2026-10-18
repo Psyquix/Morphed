@@ -10,6 +10,13 @@
 #     built_shape) -> enqueue reason "new" so the next build picks it up even
 #     though no patch source or app version moved (the _check_only_listed throttle
 #     means a new app would otherwise never be fetched or triggered).
+#   * a tracked field of an app that is already built moved — `build-mode`,
+#     `patches-source`, a pin, the patch selection, anything in
+#     `retry_tracked_keys` — -> enqueue `reason: "config"` and record the field diff
+#     in changed_apps.json. built_shape stores each app's last-built tracked map for
+#     exactly this, because arch equality is not config equality: publishing
+#     `build-mode = "both"` over an app that shipped an APK built nothing new, and the
+#     pool left it disabled (why: decisions/0014).
 #   * an app removed from the config, or a failed arch no longer requested ->
 #     prune it from the pending list (MacroDroid both -> arm64-v8a drops its
 #     arm-v7a retry). A key the config no longer lists is unreachable from here on
@@ -35,7 +42,8 @@
 # commit step runs — the flag means "the watcher's state moved", and a run only
 # starts if the resulting pool has an enabled app to build.
 #
-# Env: GITHUB_OUTPUT (writes TRIGGER_CONFIG_CHANGE=0/1).
+# Env: GITHUB_OUTPUT (writes TRIGGER_CONFIG_CHANGE=0/1). Writes
+# pending.stable.json, pending.beta.json, new_apps.json and changed_apps.json.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=retry_lib.sh
@@ -52,6 +60,10 @@ trigger=0
 # Apps newly enqueued THIS run (not carried-over retries), per channel, for the
 # "new apps added" notification. Written to new_apps.json at the end.
 newjson='{"stable":[],"beta":[]}'
+# Apps enqueued (or re-queued) because their tracked config moved, with the field
+# diff that proves it: {channel: {app: [{field, from, to}]}}. Written to
+# changed_apps.json; the announcement reads it, so it carries no rendering rules.
+changedjson='{"stable":{},"beta":{}}'
 
 # to_arr <space-separated tokens> -> sorted, unique JSON array. LC_ALL=C keeps the
 # order byte-stable ("arm-v7a" before "arm64-v8a") regardless of the runner locale.
@@ -69,6 +81,7 @@ process_channel() { # $1=channel $2=config-file
 	[ -f "$cfg" ] || return 0
 
 	local apps cfg_count bs_count first_run key want want_arr bs_arr pend_json pend_arches kept need added fp rearmed present gone
+	local have_cfg want_cfg cdiff cdiff_other cfg_known want_k have_k widened moved
 	apps=$(retry_list_apps "$cfg")
 	cfg_count=$(printf '%s\n' "$apps" | grep -c . || true)
 	bs_count=$(jqx -r --arg c "$ch" '(.[$c] // {}) | length' <<<"$bs")
@@ -95,13 +108,17 @@ process_channel() { # $1=channel $2=config-file
 	fi
 
 	if [ "$first_run" = 1 ]; then
-		# Seed built_shape to the current config shape and enqueue nothing.
-		local seed="{}"
+		# Seed built_shape to the current config shape and enqueue nothing. The
+		# tracked map is seeded alongside the arches for exactly the reason the arch
+		# list is: an empty file must not make 200 apps look newly requested.
+		local seed="{}" wmap
 		while IFS= read -r key; do
 			[ -z "$key" ] && continue
 			want=$(retry_effective_arch "$cfg" "$key")
 			want_arr=$(to_arr "$want")
-			seed=$(jqx -c --arg k "$key" --argjson a "$want_arr" '.[$k] = $a' <<<"$seed")
+			wmap=$(retry_effective_cfg "$cfg" "$key")
+			seed=$(jqx -c --arg k "$key" --argjson a "$want_arr" --argjson m "$wmap" \
+				'.[$k] = {arches: $a, cfg: $m}' <<<"$seed")
 		done <<<"$apps"
 		bs=$(jqx -c --arg c "$ch" --argjson s "$seed" '.[$c] = $s' <<<"$bs")
 		return 0
@@ -111,7 +128,43 @@ process_channel() { # $1=channel $2=config-file
 		[ -z "$key" ] && continue
 		want=$(retry_effective_arch "$cfg" "$key")
 		want_arr=$(to_arr "$want")
-		bs_arr=$(jqx -c --arg c "$ch" --arg k "$key" '(.[$c][$k] // [])' <<<"$bs")
+		bs_arr=$(retry_shape_arches "$ch" "$key" "$bs")
+
+		# Does the tracked part of this app's config differ from the config its last
+		# successful build was produced from? A map the entry does not carry is not an
+		# empty diff: it is NO EVIDENCE, and guessing from the current config would
+		# forgive every edit published before the seed landed.
+		have_cfg=$(retry_shape_cfg "$ch" "$key" "$bs")
+		want_cfg=$(retry_effective_cfg "$cfg" "$key")
+		cdiff='[]'
+		cdiff_other='[]'
+		moved=0
+		cfg_known=true
+		if [ "$have_cfg" = '"NONE"' ]; then
+			cfg_known=false
+		else
+			cdiff=$(jqx -cn --argjson a "$have_cfg" --argjson b "$want_cfg" '
+				[ ($a | keys_unsorted[]), ($b | keys_unsorted[]) ] | unique
+				| map(. as $f | {field: $f, from: ($a[$f] // null), to: ($b[$f] // null)})
+				| map(select(.from != .to))')
+			cdiff_other=$(printf '%s' "$cdiff" | jqx -c \
+				'map(select((.field != "arch") and (.field != "build-mode")))')
+			# WIDENING, not difference. A `both -> apk` edit asks for fewer artifacts than
+			# the last build produced; no rebuild can un-publish the module it dropped, and
+			# re-running it would only re-derive an APK that already matches its published
+			# fingerprint. Any other tracked key is a difference in kind, not in size — a
+			# new source, a new pin, a changed patch selection — so it always counts.
+			want_k=$(to_arr "$(retry_effective_kinds "$cfg" "$key")")
+			have_k=$(to_arr "$(retry_shape_kinds "$ch" "$key" "$bs")")
+			widened=$(jqx -cn --argjson wa "$want_arr" --argjson wk "$want_k" \
+				--argjson ha "$bs_arr" --argjson hk "$have_k" '
+					[ $wa[] as $a | $wk[] as $k | "\($a):\($k)"] -
+					[ $ha[] as $a | $hk[] as $k | "\($a):\($k)"] | length')
+			moved=0
+			if [ "${widened:-0}" -gt 0 ] || [ "$cdiff_other" != "[]" ]; then
+				moved=1
+			fi
+		fi
 
 		pend_json=$(jqx -c --arg c "$ch" --arg k "$key" '.[$c][$k]' <<<"$pb")
 		if [ "$pend_json" = "null" ]; then
@@ -124,6 +177,27 @@ process_channel() { # $1=channel $2=config-file
 					'.[$c][$k] = {reason:"new", arches:$a, attempts:0, parked:false, cfg:$fp}' <<<"$pb")
 				newjson=$(jqx -c --arg c "$ch" --arg k "$key" '(.[$c] // []) += [$k]' <<<"$newjson")
 				trigger=1
+			elif [ "$cfg_known" != true ]; then
+				# No baseline yet: take the current one and ask for nothing. This is the
+				# per-app cold-start guard, and the reason the one-shot seed reads published
+				# artifacts instead — see decisions/0014.
+				bs=$(jqx -c --arg c "$ch" --arg k "$key" --argjson m "$want_cfg" '
+					.[$c][$k] = ((.[$c][$k] // []) | if type == "array"
+						then {arches: ., cfg: $m} else . + {cfg: $m} end)' <<<"$bs")
+				echo "Recorded the tracked config for '$key' ($ch); nothing to build."
+			elif [ "$moved" = 1 ]; then
+				# The order changed but no arch did — the `build-mode` / `patches-source`
+				# / pin edit that used to vanish. Force the app the same way a new arch
+				# does, and keep the baseline where it is: only a build that actually
+				# produced the artifacts may advance it, or a failing rebuild would be
+				# forgiven and the change forgotten.
+				fp=$(retry_fingerprint "$cfg" "$key")
+				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$want_arr" --arg fp "$fp" \
+					'.[$c][$k] = {reason:"config", arches:$a, attempts:0, parked:false, cfg:$fp}' <<<"$pb")
+				changedjson=$(jqx -c --arg c "$ch" --arg k "$key" --argjson d "$cdiff" \
+					'(.[$c] // {})[$k] = $d' <<<"$changedjson")
+				echo "Config change for '$key' ($ch): $(printf '%s' "$cdiff" | jqx -r 'map("\(.field): \(.from // "-") -> \(.to // "-")") | join(", ")')"
+				trigger=1
 			fi
 		else
 			# Already queued: prune arches the config no longer requests.
@@ -135,6 +209,14 @@ process_channel() { # $1=channel $2=config-file
 			elif [ "$kept" != "$pend_arches" ]; then
 				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$kept" '.[$c][$k].arches = $a' <<<"$pb")
 				trigger=1
+			fi
+			# Something to announce even when the queue entry did the building: the
+			# pool force-enables a live pending key anyway, so a maintainer's edit is what
+			# caused this run, and the notice should say so rather than credit nothing. A
+			# parked entry builds nothing, so it earns no notice.
+			if [ "$moved" = 1 ] && [ "$(jqx -r '.parked == true' <<<"$pend_json")" != "true" ]; then
+				changedjson=$(jqx -c --arg c "$ch" --arg k "$key" --argjson d "$cdiff" \
+					'(.[$c] // {})[$k] = $d' <<<"$changedjson")
 			fi
 			# Re-arm (ADR 0010): the entry describes an order placed under a previous
 			# config, so ask whether that config still exists. Three cases, and only two
@@ -210,7 +292,11 @@ jqx -c '[.beta | to_entries[] | select(.value.parked != true) | .key]' <<<"$pb" 
 # The apps added THIS run, per channel, for ci_notify_new_apps.sh (empty otherwise).
 printf '%s\n' "$newjson" >new_apps.json
 
+# And the apps whose tracked config moved, with the field diff to show for it.
+# Written in the repo's canonical document layout like every other persisted JSON.
+jqx . <<<"$changedjson" >changed_apps.json
+
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
 	echo "TRIGGER_CONFIG_CHANGE=$trigger" >>"$GITHUB_OUTPUT"
 fi
-echo "Config-change reconciliation: TRIGGER_CONFIG_CHANGE=$trigger; pending stable=$(jqx -c '.stable | length' <<<"$pb"), beta=$(jqx -c '.beta | length' <<<"$pb")"
+echo "Config-change reconciliation: TRIGGER_CONFIG_CHANGE=$trigger; pending stable=$(jqx -c '.stable | length' <<<"$pb"), beta=$(jqx -c '.beta | length' <<<"$pb"); config-changed stable=$(jqx -c '.stable | length' <<<"$changedjson"), beta=$(jqx -c '.beta | length' <<<"$changedjson")"
