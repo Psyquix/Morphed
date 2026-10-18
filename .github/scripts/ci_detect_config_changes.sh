@@ -12,7 +12,12 @@
 #     means a new app would otherwise never be fetched or triggered).
 #   * an app removed from the config, or a failed arch no longer requested ->
 #     prune it from the pending list (MacroDroid both -> arm64-v8a drops its
-#     arm-v7a retry).
+#     arm-v7a retry). A key the config no longer lists is unreachable from here on
+#     — this loop only visits present apps, and the build job skips a disabled one —
+#     so it would sit in the queue forever and keep firing TRIGGER_CONFIG_CHANGE.
+#     Pruning covers the queue ONLY: built_shape records that the artifact was
+#     built, and it still was, so disabling an app and re-enabling it is not a new
+#     build request unless its own config changed (ADR 0010).
 #   * a pending entry already recorded by the build job (reason "retry") is left
 #     alone as to its budget - attempts/parked belong to the build job - except for
 #     arch pruning, and except for the re-arm: when the app's OWN compiled entry
@@ -62,10 +67,24 @@ process_channel() { # $1=channel $2=config-file
 	local ch=$1 cfg=$2
 	[ -f "$cfg" ] || return 0
 
-	local apps cfg_count bs_count first_run key want want_arr bs_arr pend_json pend_arches kept need added fp rearmed
+	local apps cfg_count bs_count first_run key want want_arr bs_arr pend_json pend_arches kept need added fp rearmed present gone
 	apps=$(retry_list_apps "$cfg")
 	cfg_count=$(printf '%s\n' "$apps" | grep -c . || true)
 	bs_count=$(jqx -r --arg c "$ch" '(.[$c] // {}) | length' <<<"$bs")
+
+	# Drop queue entries for apps this channel no longer lists. Bookkeeping only:
+	# a deletion is not a reason to build, so `trigger` stays untouched — the file
+	# still gets written by the content compare below, which is what persists it.
+	present=$(printf '%s' "$apps" | jqx -Rs 'split("\n") | map(select(length > 0)) | unique')
+	gone=$(jqx -r --arg c "$ch" --argjson have "$present" \
+		'(.[$c] // {}) | keys_unsorted[] | . as $k | select($have | index($k) | not)' <<<"$pb")
+	if [ -n "$gone" ]; then
+		while IFS= read -r key; do
+			[ -z "$key" ] && continue
+			echo "Pruned stale pending entry '$key' ($ch): the config no longer lists it."
+			pb=$(jqx -c --arg c "$ch" --arg k "$key" 'del(.[$c][$k])' <<<"$pb")
+		done <<<"$gone"
+	fi
 
 	# Cold start for this channel: nothing built yet but the config has apps.
 	if [ "${bs_count:-0}" -eq 0 ] && [ "${cfg_count:-0}" -gt 0 ]; then

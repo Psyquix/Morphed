@@ -8,7 +8,7 @@
 # acceptance here is paired with the refusal that makes it mean something: an
 # unchanged config must NOT re-arm, a reordered-but-identical block must NOT re-arm,
 # a re-armed entry must NOT re-arm again on the next run, and an app that left the
-# config must be left alone.
+# config must lose its queue entry while its built_shape memory stays.
 #
 # Drives the real watcher script (no stubs): it reads config.stable.json /
 # config.beta.json and state/*.json from its cwd, so each case runs in its own
@@ -171,12 +171,48 @@ grep -q "Re-armed" <<<"$OUT_LOG" && fail "case11 re-armed an app whose config ne
 [[ "$(jqx -r '.stable["App-x"].attempts' <<<"$OUT_STATE")" == "1" ]] ||
 	fail "case11 the watcher reset an attempt it had no reason to reset: $OUT_STATE"
 
-# --- 12. an app that left the config is not touched by any of this -------------
-run_case app_absent_untouched \
-	'{"patches-version":"stable","Other-y":{"pkg-name":"com.o","app-name":"Other","apkmirror-dlurl":"https://apkmirror.com/o"}}' \
-	'{"stable":{"App-x":{"reason":"retry","arches":["arm-v7a"],"attempts":3,"parked":true,"cfg":"old"}},"beta":{}}' \
-	"$SHAPE"
-[[ "$(jqx -r '.stable["App-x"].attempts' <<<"$OUT_STATE")" == "3" ]] || fail "case9 touched an app not in the config"
-[[ "$OUT_PENDING" == "[]" ]] || fail "case9 queued a removed app: $OUT_PENDING"
+# --- 12. an app that left the config loses its queue entry, not its memory ------
+# ADR 0010 promises that removal prunes the pending entry, and a key the config no
+# longer lists is unreachable for every later writer, so a parked orphan would sit
+# there forever. The paired control is the app that IS still listed: its entry must
+# survive the same pass untouched, or the prune would be a blanket wipe that passes
+# vacuously. Both are parked, so the only thing that can raise the trigger is the
+# deletion itself — and a bookkeeping write must not buy a build.
+ONLY_OTHER='{"patches-version":"stable","Other-y":{"pkg-name":"com.o","app-name":"Other","apkmirror-dlurl":"https://apkmirror.com/o"}}'
+# The memory holds BOTH apps: the one still listed (so nothing looks new) and the one
+# that left the config (whose artifact was built and stays credited).
+SHAPE_LEFT='{"stable":{"App-x":["arm-v7a","arm64-v8a"],"Other-y":["arm-v7a","arm64-v8a"]},"beta":{}}'
+FP_OTHER=$(cd "$t" && printf '%s\n' "$ONLY_OTHER" >probe_other.json &&
+	retry_fingerprint probe_other.json "Other-y")
+[ -n "$FP_OTHER" ] || fail "fingerprint helper returned nothing for Other-y"
+run_case app_absent_pruned_queue_kept_memory \
+	"$ONLY_OTHER" \
+	"{\"stable\":{\"App-x\":{\"reason\":\"retry\",\"arches\":[\"arm-v7a\"],\"attempts\":3,\"parked\":true,\"cfg\":\"old\"},\"Other-y\":{\"reason\":\"retry\",\"arches\":[\"arm64-v8a\"],\"attempts\":2,\"parked\":true,\"cfg\":\"$FP_OTHER\"}},\"beta\":{}}" \
+	"$SHAPE_LEFT"
+[[ "$(jqx -r '.stable | has("App-x")' <<<"$OUT_STATE")" == "false" ]] ||
+	fail "case12 a removed app kept its queue entry: $OUT_STATE"
+grep -q "Pruned stale pending entry 'App-x'" <<<"$OUT_LOG" ||
+	fail "case12: no prune logged: $OUT_LOG"
+[[ "$(jqx -c '.stable["Other-y"]' <<<"$OUT_STATE")" == \
+	"$(jqx -c '.stable["Other-y"]' <<<"{\"stable\":{\"Other-y\":{\"reason\":\"retry\",\"arches\":[\"arm64-v8a\"],\"attempts\":2,\"parked\":true,\"cfg\":\"$FP_OTHER\"}},\"beta\":{}}")" ]] ||
+	fail "case12 rewrote an app the config still lists: $OUT_STATE"
+[[ "$OUT_TRIGGER" == "0" ]] || fail "case12 the prune fired a build: $OUT_TRIGGER"
+[[ "$OUT_PENDING" == "[]" ]] || fail "case12 queued a parked survivor: $OUT_PENDING"
+# built_shape must be unchanged — the queue forgets, the memory does not. The file is
+# written in the repo's canonical pretty layout, so compare the parsed documents.
+[[ "$(jqx -c . <<<"$OUT_STATE2")" == "$(printf '%s\n' "$SHAPE_LEFT" | jqx -c .)" ]] ||
+	fail "case12 the prune touched built_shape: $OUT_STATE2"
+
+# --- 13. re-enabling a disabled app is not a build request on its own -----------
+# Disabling pruned its queue entry, and the memory survived, so the app comes back
+# with every requested arch already recorded as built: nothing to enqueue and nothing
+# to announce. The paired case above is what makes this mean something — without the
+# memory the app would read as brand new.
+run_case reenable_without_change \
+	"$STABLE_CFG" '{"stable":{},"beta":{}}' \
+	'{"stable":{"App-x":["arm-v7a","arm64-v8a"]},"beta":{}}'
+[[ "$OUT_TRIGGER" == "0" ]] || fail "case13 fired a build for an unchanged re-enable"
+[[ "$OUT_PENDING" == "[]" ]] || fail "case13 queued an unchanged re-enable: $OUT_PENDING"
+[[ "$OUT_NEWAPPS" == '{"stable":[],"beta":[]}' ]] || fail "case13 announced it as new: $OUT_NEWAPPS"
 
 echo "CONFIG RE-ARM TESTS: PASS"

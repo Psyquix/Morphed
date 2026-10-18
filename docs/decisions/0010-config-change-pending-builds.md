@@ -55,7 +55,13 @@ against `built_shape`:
   enqueue `reason: new` (force-enable);
 - an app removed from the config, or a **failed arch no longer requested** →
   prune that pending entry (MacroDroid switched `both → arm64-v8a` drops its
-  `arm-v7a` retry);
+  `arm-v7a` retry); the queue only — `built_shape` keeps its entry, because the
+  artifact really was built. A key the config no longer lists is visited by neither
+  this loop nor the build job, so pruning it is the only thing that can retire it;
+  an orphaned non-parked entry would otherwise keep `TRIGGER_CONFIG_CHANGE` high on
+  every run. Pruning is bookkeeping and never raises the trigger by itself. The
+  consequence is deliberate: re-enabling an app whose config did not change enqueues
+  nothing, and a rebuild that would reproduce identical bytes is not worth a release.
 - a pending `retry` entry whose `attempts` reached the cap is **parked** and not
   force-enabled, but is **re-armed** when the config moves under it. The signal is a
   `cfg` field on the entry: the SHA-1 of that app's own compiled entry (keys sorted,
