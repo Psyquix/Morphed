@@ -32,7 +32,8 @@
 # force-built, so the first run per channel SEEDS built_shape to the current
 # config and enqueues nothing; only apps/arches added afterwards are treated as
 # new. The seed is persisted by flagging TRIGGER_CONFIG_CHANGE so the watcher's
-# commit step runs.
+# commit step runs — the flag means "the watcher's state moved", and a run only
+# starts if the resulting pool has an enabled app to build.
 #
 # Env: GITHUB_OUTPUT (writes TRIGGER_CONFIG_CHANGE=0/1).
 set -euo pipefail
@@ -72,9 +73,9 @@ process_channel() { # $1=channel $2=config-file
 	cfg_count=$(printf '%s\n' "$apps" | grep -c . || true)
 	bs_count=$(jqx -r --arg c "$ch" '(.[$c] // {}) | length' <<<"$bs")
 
-	# Drop queue entries for apps this channel no longer lists. Bookkeeping only:
-	# a deletion is not a reason to build, so `trigger` stays untouched — the file
-	# still gets written by the content compare below, which is what persists it.
+	# Drop queue entries for apps this channel no longer lists. The write still has
+	# to be committed (see the flag's double role at the foot of this file), but it
+	# enqueues nothing, so no build follows from it alone.
 	present=$(printf '%s' "$apps" | jqx -Rs 'split("\n") | map(select(length > 0)) | unique')
 	gone=$(jqx -r --arg c "$ch" --argjson have "$present" \
 		'(.[$c] // {}) | keys_unsorted[] | . as $k | select($have | index($k) | not)' <<<"$pb")
@@ -158,8 +159,11 @@ process_channel() { # $1=channel $2=config-file
 					.[$c][$k] |= (.attempts = 0 | .parked = false | .cfg = $fp)
 				else . end' <<<"$pb")
 			if [ "$rearmed" != "$pb" ]; then
-				# Only a budget change is a reason to build; recording a baseline is
-				# bookkeeping the commit step can carry without starting a run.
+				# Only a budget change is worth announcing as work queued. Recording a
+				# baseline changes the file without changing any app's budget, so it does
+				# not touch `trigger` here — the write is persisted by the flag's second
+				# role at the foot of this file, and it starts no run because it enables
+				# nothing in the pool.
 				if [ "$(jqx -c --arg c "$ch" --arg k "$key" '.[$c][$k] | {attempts, parked}' <<<"$pb")" != \
 					"$(jqx -c --arg c "$ch" --arg k "$key" '.[$c][$k] | {attempts, parked}' <<<"$rearmed")" ]; then
 					echo "Re-armed '$key' ($ch): its config changed since this entry was written (attempts reset, park lifted)."
@@ -189,7 +193,14 @@ if [ "$bs" != "$bs_orig" ] || [ "$pb" != "$pb_orig" ]; then
 	# other persisted JSON in this repo uses - see jsonfmt.py.
 	jqx . <<<"$bs" >"$BS_FILE"
 	jqx . <<<"$pb" >"$PB_FILE"
-	[ "$bs" != "$bs_orig" ] && trigger=1
+	# Either file moving has to reach `data`, and this flag is the only signal that
+	# gets it there: the commit step is gated on ANYTHING_CHANGED, which this feeds.
+	# The flag therefore has a double role — "the watcher's state moved", not "build
+	# something" — and whether a run actually starts is decided downstream, by
+	# ci_resolve_triggers.sh counting the enabled apps in the pool. A bookkeeping
+	# write enables nothing, so it persists without buying a build; suppressing it
+	# here would lose the write and leave the next run to repeat it forever.
+	trigger=1
 fi
 
 # Pre-extract the non-parked pending keys per channel for the pool generator.

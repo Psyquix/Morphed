@@ -176,8 +176,8 @@ grep -q "Re-armed" <<<"$OUT_LOG" && fail "case11 re-armed an app whose config ne
 # longer lists is unreachable for every later writer, so a parked orphan would sit
 # there forever. The paired control is the app that IS still listed: its entry must
 # survive the same pass untouched, or the prune would be a blanket wipe that passes
-# vacuously. Both are parked, so the only thing that can raise the trigger is the
-# deletion itself — and a bookkeeping write must not buy a build.
+# vacuously. Both are parked, so nothing is queued for the pool — the write must
+# still be committed, and committing it must still not buy a build.
 ONLY_OTHER='{"patches-version":"stable","Other-y":{"pkg-name":"com.o","app-name":"Other","apkmirror-dlurl":"https://apkmirror.com/o"}}'
 # The memory holds BOTH apps: the one still listed (so nothing looks new) and the one
 # that left the config (whose artifact was built and stays credited).
@@ -196,23 +196,42 @@ grep -q "Pruned stale pending entry 'App-x'" <<<"$OUT_LOG" ||
 [[ "$(jqx -c '.stable["Other-y"]' <<<"$OUT_STATE")" == \
 	"$(jqx -c '.stable["Other-y"]' <<<"{\"stable\":{\"Other-y\":{\"reason\":\"retry\",\"arches\":[\"arm64-v8a\"],\"attempts\":2,\"parked\":true,\"cfg\":\"$FP_OTHER\"}},\"beta\":{}}")" ]] ||
 	fail "case12 rewrote an app the config still lists: $OUT_STATE"
-[[ "$OUT_TRIGGER" == "0" ]] || fail "case12 the prune fired a build: $OUT_TRIGGER"
+[[ "$OUT_TRIGGER" == "1" ]] || fail "case12 the prune would never reach data: $OUT_TRIGGER"
 [[ "$OUT_PENDING" == "[]" ]] || fail "case12 queued a parked survivor: $OUT_PENDING"
 # built_shape must be unchanged — the queue forgets, the memory does not. The file is
 # written in the repo's canonical pretty layout, so compare the parsed documents.
 [[ "$(jqx -c . <<<"$OUT_STATE2")" == "$(printf '%s\n' "$SHAPE_LEFT" | jqx -c .)" ]] ||
 	fail "case12 the prune touched built_shape: $OUT_STATE2"
 
+# --- 12b. the other half of that flag: persisted, and still no build -----------
+# TRIGGER_CONFIG_CHANGE feeds ANYTHING_CHANGED, which is what runs the data commit.
+# A bookkeeping write therefore has to raise it — and the run must still not start,
+# because ci_resolve_triggers.sh counts the enabled apps in the pool.
+RES="$t/resolve_after_prune"
+mkdir -p "$RES/configs"
+printf '%s\n' '{"patches-version":"stable","Other-y":{"enabled":false,"pkg-name":"com.o"}}' >"$RES/configs/stable_build.json"
+printf '%s\n' '{"patches-version":"beta"}' >"$RES/configs/beta_build.json"
+(
+	cd "$RES" || exit 1
+	RAW_TRIGGER_STABLE=0 RAW_TRIGGER_BETA=0 RAW_TRIGGER_APP_UPDATE=0 \
+		RAW_TRIGGER_CONFIG_CHANGE=1 GITHUB_OUTPUT="$RES/gho" \
+		bash "$REPO/.github/scripts/ci_resolve_triggers.sh" >"$RES/log" 2>&1
+) || fail "12b: ci_resolve_triggers.sh exited non-zero: $(cat "$RES/log")"
+[[ "$(sed -n 's/^TRIGGER_STABLE=//p' "$RES/gho")" == "0" ]] ||
+	fail "12b a state-only write still started a build"
+ok_12b=1
+
 # --- 13. re-enabling a disabled app is not a build request on its own -----------
 # Disabling pruned its queue entry, and the memory survived, so the app comes back
-# with every requested arch already recorded as built: nothing to enqueue and nothing
-# to announce. The paired case above is what makes this mean something — without the
-# memory the app would read as brand new.
+# with every requested arch already recorded as built: nothing to enqueue, nothing
+# to announce and no state file to rewrite. The paired case above is what makes
+# this mean something — without the memory the app would read as brand new.
 run_case reenable_without_change \
 	"$STABLE_CFG" '{"stable":{},"beta":{}}' \
 	'{"stable":{"App-x":["arm-v7a","arm64-v8a"]},"beta":{}}'
-[[ "$OUT_TRIGGER" == "0" ]] || fail "case13 fired a build for an unchanged re-enable"
+[[ "$OUT_TRIGGER" == "0" ]] || fail "case13 rewrote state it had no reason to write"
 [[ "$OUT_PENDING" == "[]" ]] || fail "case13 queued an unchanged re-enable: $OUT_PENDING"
 [[ "$OUT_NEWAPPS" == '{"stable":[],"beta":[]}' ]] || fail "case13 announced it as new: $OUT_NEWAPPS"
+[[ -n "${ok_12b:-}" ]] || fail "case12b did not run"
 
 echo "CONFIG RE-ARM TESTS: PASS"

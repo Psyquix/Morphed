@@ -59,9 +59,14 @@ against `built_shape`:
   artifact really was built. A key the config no longer lists is visited by neither
   this loop nor the build job, so pruning it is the only thing that can retire it;
   an orphaned non-parked entry would otherwise keep `TRIGGER_CONFIG_CHANGE` high on
-  every run. Pruning is bookkeeping and never raises the trigger by itself. The
-  consequence is deliberate: re-enabling an app whose config did not change enqueues
-  nothing, and a rebuild that would reproduce identical bytes is not worth a release.
+  every run. Pruning enqueues nothing, but it does raise the flag — which means "the
+  watcher's state moved", not "build this": it is the only signal that gets the
+  rewritten `state/*.json` committed to `data`, and suppressing it would lose the
+  write and leave every later run to repeat it. Whether a build starts is decided
+  downstream by the enabled-app count in the pool (`ci_resolve_triggers.sh`), which a
+  prune leaves empty. The consequence of keeping the memory is deliberate:
+  re-enabling an app whose config did not change enqueues nothing, and a rebuild that
+  would reproduce identical bytes is not worth a release.
 - a pending `retry` entry whose `attempts` reached the cap is **parked** and not
   force-enabled, but is **re-armed** when the config moves under it. The signal is a
   `cfg` field on the entry: the SHA-1 of that app's own compiled entry (keys sorted,
