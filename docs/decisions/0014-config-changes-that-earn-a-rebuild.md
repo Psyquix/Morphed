@@ -109,12 +109,15 @@ permanent rather than transient.
 
 ### The announcement says what changed
 
-`changed_apps.json` carries the field diff (`{field, from, to}`) for every app
-enqueued this way, on the same announcement topic as new apps — because a maintainer
-who edited a config and sees a build appear with no word about why cannot tell
-"my edit worked" from "my edit was ignored", which is how this went unnoticed.
+`changed_apps.json` carries the field diff (`{field, from, to}`) for the run that
+first notices the change, on the same announcement topic as new apps — because a
+maintainer who edited a config and sees a build appear with no word about why cannot
+tell "my edit worked" from "my edit was ignored", which is how this went unnoticed.
 An app woken by a config change is announced as a change, never as "New App(s)
-Added".
+Added". The announcement fires once: a queue entry that already carries the new
+fingerprint keeps the app in the pool but stays quiet, or every scheduled run until
+the build succeeded would re-announce one edit and the topic would stop meaning
+"something changed just now".
 
 ## Rejected alternatives
 
@@ -175,7 +178,8 @@ Added".
 now covers, each with its paired negative control: `build-mode` widening enqueues
 `reason: "config"` with the exact field diff and does **not** appear in
 `new_apps.json`; narrowing enqueues nothing; a dlurl edit enqueues nothing; a
-patch-source move enqueues and names the field; an entry with no baseline records
+patch-source move enqueues and names the field; the same edit is not announced twice
+by the next run; an entry with no baseline records
 one, enqueues nothing and still gets committed; the watcher never advances a baseline
 it just asked to rebuild; and every documented config key is classified.
 `bash .github/traces/trace_runner.sh verify` guards the engine half. The dedup half

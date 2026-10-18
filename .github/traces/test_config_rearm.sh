@@ -314,4 +314,20 @@ done < <(sed -n 's/^\([a-z][a-z0-9_-]*\)[[:space:]]*=.*$/\1/p' "$REPO/CONFIG.md"
 [ -z "$unclassified" ] ||
 	fail "CONFIG.md documents keys that are neither tracked nor ignored: $unclassified"
 
+# --- 20. the same edit must not be announced twice ---------------------------
+# Run one wakes the app and announces it; run two sees the queue entry it left
+# behind. The entry keeps the app in the pool, so the second run must stay quiet —
+# otherwise every scheduled run until the build succeeds would re-announce one edit,
+# and the announcement topic would stop meaning "something changed just now".
+run_case wake_announces "$CFG_BOTH" '{"stable":{},"beta":{}}' "$SEED_X"
+[[ "$OUT_PENDING" == '["App-x"]' ]] || fail "case20 run1 did not queue: $OUT_PENDING"
+[[ "$(jqx -c '.stable["App-x"] // empty' <<<"$(jqx -c . <<<"$OUT_CHANGED")")" != "" ]] ||
+	fail "case20 run1 announced nothing: $OUT_CHANGED"
+run_case wake_announced_once "$CFG_BOTH" "$OUT_STATE" "$SEED_X"
+[[ "$(jqx -c . <<<"$OUT_CHANGED")" == '{"stable":{},"beta":{}}' ]] ||
+	fail "case20 run2 announced the same edit again: $OUT_CHANGED"
+[[ "$OUT_PENDING" == '["App-x"]' ]] || fail "case20 run2 dropped the still-owed app: $OUT_PENDING"
+[[ "$(jqx -r '.stable["App-x"].attempts' <<<"$OUT_STATE")" == "0" ]] ||
+	fail "case20 run2 spent a retry budget it did not earn: $OUT_STATE"
+
 echo "CONFIG RE-ARM TESTS: PASS"

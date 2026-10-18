@@ -81,7 +81,7 @@ process_channel() { # $1=channel $2=config-file
 	[ -f "$cfg" ] || return 0
 
 	local apps cfg_count bs_count first_run key want want_arr bs_arr pend_json pend_arches kept need added fp rearmed present gone
-	local have_cfg want_cfg cdiff cdiff_other cfg_known want_k have_k widened moved
+	local have_cfg want_cfg cdiff cdiff_other cfg_known want_k have_k widened moved prev_cfg
 	apps=$(retry_list_apps "$cfg")
 	cfg_count=$(printf '%s\n' "$apps" | grep -c . || true)
 	bs_count=$(jqx -r --arg c "$ch" '(.[$c] // {}) | length' <<<"$bs")
@@ -210,14 +210,10 @@ process_channel() { # $1=channel $2=config-file
 				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$kept" '.[$c][$k].arches = $a' <<<"$pb")
 				trigger=1
 			fi
-			# Something to announce even when the queue entry did the building: the
-			# pool force-enables a live pending key anyway, so a maintainer's edit is what
-			# caused this run, and the notice should say so rather than credit nothing. A
-			# parked entry builds nothing, so it earns no notice.
-			if [ "$moved" = 1 ] && [ "$(jqx -r '.parked == true' <<<"$pend_json")" != "true" ]; then
-				changedjson=$(jqx -c --arg c "$ch" --arg k "$key" --argjson d "$cdiff" \
-					'(.[$c] // {})[$k] = $d' <<<"$changedjson")
-			fi
+			# The fingerprint the entry was written under, kept before anything
+			# refreshes it: this is what tells an edit noticed for the first time from
+			# the same edit being re-announced on every later run.
+			prev_cfg=$(jqx -r --arg c "$ch" --arg k "$key" '(.[$c][$k].cfg // "")' <<<"$pb")
 			# Re-arm (ADR 0010): the entry describes an order placed under a previous
 			# config, so ask whether that config still exists. Three cases, and only two
 			# of them touch a budget:
@@ -250,6 +246,18 @@ process_channel() { # $1=channel $2=config-file
 					"$(jqx -c --arg c "$ch" --arg k "$key" '.[$c][$k] | {attempts, parked}' <<<"$rearmed")" ]; then
 					echo "Re-armed '$key' ($ch): its config changed since this entry was written (attempts reset, park lifted)."
 					trigger=1
+				fi
+				# Announce only when this run is the one that noticed. The entry keeps a
+				# widened app in the pool on every later run, so announcing on `moved`
+				# alone would repeat one edit on the announcement topic until the build
+				# finally ran — and the notice would stop meaning "something changed just
+				# now". A stale entry fingerprint is exactly that first noticing. An entry
+				# with no fingerprint predates it, so there is nothing to compare and
+				# nothing to claim.
+				if [ "$moved" = 1 ] && [ -n "$prev_cfg" ] && [ "$prev_cfg" != "$fp" ]; then
+					changedjson=$(jqx -c --arg c "$ch" --arg k "$key" --argjson d "$cdiff" \
+						'(.[$c] // {})[$k] = $d' <<<"$changedjson")
+					echo "Config change for '$key' ($ch): $(printf '%s' "$cdiff" | jqx -r 'map("\(.field): \(.from // "-") -> \(.to // "-")") | join(", ")')"
 				fi
 				pb=$rearmed
 			fi
