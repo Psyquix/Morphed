@@ -4319,11 +4319,45 @@ content_hash() { # $1=apk
 }
 
 # Published fingerprint for one dedup key, "" when the state file or the key
-# is absent (first build of that app+arch ever → publish, never guess).
+# is absent (first build of that app+arch ever → publish, never guess). The value
+# is either a bare md5 — written before artifact kinds were tracked — or
+# {hash, kinds}; both are read here so a half-migrated state file is never misread.
 _dedup_recorded_hash() { # $1=channel $2=key
 	local sf="state/build_content_hashes.json"
 	[ -f "$sf" ] || return 0
-	jq -r --arg chan "$1" --arg key "$2" '(.[$chan][$key] // "")' "$sf" 2>/dev/null || true
+	jq -r --arg chan "$1" --arg key "$2" '
+		(.[$chan][$key] // "")
+		| if type == "object" then (.hash // "") else . end' "$sf" 2> /dev/null || true
+}
+
+# Kinds recorded as live for one dedup key, space-separated; empty when nothing is
+# on the record. An entry written before kind tracking says nothing about kinds, and
+# an unknown kind can NEVER justify withholding a release. That is the opposite
+# polarity to built_shape's baseline rule, deliberately: a duplicate skip is
+# destructive and terminal (the missing artifact would never be asked for again),
+# while one extra publish is merely noise.
+_dedup_recorded_kinds() { # $1=channel $2=key
+	local sf="state/build_content_hashes.json"
+	[ -f "$sf" ] || return 0
+	jq -r --arg chan "$1" --arg key "$2" '
+		(.[$chan][$key] // {})
+		| if type == "object" then ((.kinds // []) | join(" ")) else "" end' \
+		"$sf" 2> /dev/null | tr -s '[:space:]' ' ' || true
+}
+
+# _dedup_kinds_covered <requested kinds> <recorded kinds> — success when every
+# requested kind appears in the record. An empty record covers nothing.
+_dedup_kinds_covered() { # $1=want $2=have
+	local want=${1:-} k
+	local have=" $(printf '%s' "${2:-}" | tr -s '[:space:]' ' ') "
+	[ -n "$want" ] || return 1
+	for k in $want; do
+		case "$have" in
+		*" $k "*) ;;
+		*) return 1 ;;
+		esac
+	done
+	return 0
 }
 
 # Record a freshly built fingerprint for the CI merge step (tab-separated
@@ -4339,14 +4373,24 @@ _dedup_record_hash() { # $1=channel $2=key $3=hash
 # calls this: the local file doubles as the reference for later arch jobs in
 # the same run, and mutating it while merely measuring (log mode) would let
 # the observation period pollute its own baseline. The published copy on the
-# data branch still comes only from a successful-upload run (CI merge step).
-_dedup_store_hash() { # $1=channel $2=key $3=hash
-	local sf="state/build_content_hashes.json" tmp
-	mkdir -p "${sf%/*}" 2>/dev/null || return 0
+# data branch still comes only from a successful-upload run (CI merge step),
+# and that step — not this one — decides which kinds are credited, from the
+# filenames that actually shipped; the kinds written here are this build's
+# request, provisional within the run, so a sibling arch asking the same question
+# gets the same answer.
+_dedup_store_hash() { # $1=channel $2=key $3=hash $4=kinds
+	local sf="state/build_content_hashes.json" tmp kinds_json
+	mkdir -p "${sf%/*}" 2> /dev/null || return 0
 	[ -f "$sf" ] || echo '{}' >"$sf"
 	tmp="${sf}.tmp.$$"
-	if jq --arg chan "$1" --arg key "$2" --arg hash "$3" \
-		'.[$chan][$key] = $hash' "$sf" >"$tmp" 2>/dev/null; then
+	if [ -z "${4:-}" ]; then
+		kinds_json='[]'
+	else
+		# shellcheck disable=SC2086
+		kinds_json=$(printf '%s\n' $4 | jq -R . | jq -sc . 2> /dev/null || printf '[]')
+	fi
+	if jq --arg chan "$1" --arg key "$2" --arg hash "$3" --argjson kinds "$kinds_json" \
+		'.[$chan][$key] = {hash: $hash, kinds: $kinds}' "$sf" >"$tmp" 2> /dev/null; then
 		mv -f "$tmp" "$sf"
 	else
 		rm -f "$tmp"
@@ -4372,11 +4416,12 @@ _dedup_write_unchanged() { # $1=label $2=app $3=version $4=arch $5=key $6=hash
 	fi
 }
 
-# Verdict for one finished patched APK. rc 0 = identical to published (caller
-# skips the rest of the table build), rc 1 = changed / no verdict (publish).
-# Never touches the failure records: a duplicate is a skip, like the
-# download-exhaustion precedent, not something to report.
-check_duplicate_build() { # $1=apk $2=stem $3=label $4=app $5=version $6=arch
+# Verdict for one finished patched APK. rc 0 = identical to published AND every
+# requested artifact kind already lives (caller skips the rest of the table build),
+# rc 1 = changed / kind missing / no verdict (publish). Never touches the failure
+# records: a duplicate is a skip, like the download-exhaustion precedent, not
+# something to report.
+check_duplicate_build() { # $1=apk $2=stem $3=label $4=app $5=version $6=arch $7=kinds
 	# off / local builds / a tool the registry deems hash-unstable: no check.
 	# A hash that wobbles across rebuilds of unchanged input would only ever
 	# say "changed" (dead weight), so eligibility is measured per tool before
@@ -4393,19 +4438,25 @@ check_duplicate_build() { # $1=apk $2=stem $3=label $4=app $5=version $6=arch
 	fi
 	rec=$(_dedup_recorded_hash "$chan" "$key")
 	if [ -n "$rec" ] && [ "$rec" = "$hash" ]; then
-		if [ "${RVB_DEDUP_MODE:-log}" = enforce ]; then
-			pr "Unchanged build: '$key' matches published content hash — skipping release."
-			_dedup_write_unchanged "$3" "$4" "$5" "$6" "$key" "$hash"
-			return 0
+		# Same bytes is only half the question. An app whose config moved `apk -> both`
+		# re-produces an identical APK forever, so a hash-only skip would suppress the
+		# very artifact the maintainer asked for and then record it as built.
+		if _dedup_kinds_covered "${7:-}" "$(_dedup_recorded_kinds "$chan" "$key")"; then
+			if [ "${RVB_DEDUP_MODE:-log}" = enforce ]; then
+				pr "Unchanged build: '$key' matches published content hash and every requested kind is live — skipping release."
+				_dedup_write_unchanged "$3" "$4" "$5" "$6" "$key" "$hash"
+				return 0
+			fi
+			# Measurement phase: report what WOULD be skipped, keep publishing,
+			# and do not append — the reference set must stay exactly the
+			# published one while the numbers are being watched.
+			pr "Dedup [log]: '$key' identical to published hash ${rec} (would skip)."
+			return 1
 		fi
-		# Measurement phase: report what WOULD be skipped, keep publishing,
-		# and do not append — the reference set must stay exactly the
-		# published one while the numbers are being watched.
-		pr "Dedup [log]: '$key' identical to published hash ${rec} (would skip)."
-		return 1
+		wpr "'$key' matches the published content hash, but the requested kinds '${7:-none}' are not all on the record — releasing, so a missing artifact can appear."
 	fi
 	if [ "${RVB_DEDUP_MODE:-log}" = enforce ]; then
-		_dedup_store_hash "$chan" "$key" "$hash"
+		_dedup_store_hash "$chan" "$key" "$hash" "${7:-}"
 	fi
 	_dedup_record_hash "$chan" "$key" "$hash"
 	return 1
@@ -5779,7 +5830,7 @@ build_rv() {
 			[ -f "$_dedup_apk" ] || _dedup_apk="$apk_output"
 			if [ -f "$_dedup_apk" ] &&
 				check_duplicate_build "$_dedup_apk" "${file_prefix}-v${version_f}-${arch_f}" \
-					"$table" "$app_name" "$version_f" "$arch_f"; then
+					"$table" "$app_name" "$version_f" "$arch_f" "${build_mode_arr[*]}"; then
 				# rc 0 is the skip itself: nothing copied to BUILD_DIR, no
 				# write_build_info fragment, notes and manifest stay truthful.
 				return 0

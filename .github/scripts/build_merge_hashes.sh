@@ -26,6 +26,15 @@ set -euo pipefail
 # The state file itself is pushed to `data` by the commit_data_branch.sh step
 # that follows (it already commits every state/*.json — no new machinery).
 #
+# Each entry is {hash, kinds}: the fingerprint, and the artifact kinds proven live
+# for that stem (`apk`, `module`). A build-mode `both` app publishes two files from
+# one patched APK, and the engine's verdict asks whether every REQUESTED kind lives —
+# so this step records kinds per spelling, not per stem: a line whose module zip never
+# reached build/ must not credit `module`. Entries written before kinds existed are
+# bare md5 strings and are read as kinds-unknown, which the engine refuses to skip on;
+# merging a line for such a stem upgrades it to the object form with the kinds this
+# run proves, unioned with whatever the entry already carried.
+#
 # Env: GITHUB_REPOSITORY (presence gates CI-only behavior); GITHUB_OUTPUT for
 #      the STATE_UPDATED flag the workflow's commit-data step triggers on.
 # Reads: temp/hashes/append.*.tsv, build/, state/build_content_hashes.json (optional).
@@ -67,20 +76,30 @@ fi
 # schema: a line for any other namespace is dropped, not trusted. A line whose
 # stem has neither a published file this run nor an existing state entry is
 # dropped with a note — this is the failed-build-after-patch case, and the
-# whole reason the merge is per-line and not a blind union.
+# whole reason the merge is per-line and not a blind union. Kinds are proven per
+# spelling from build/, never taken from the line: the engine records one fingerprint
+# for an app+arch whose module zip may still fail to pack, and crediting a kind that
+# did not ship would let it be suppressed forever.
 updated=$(printf '%s\n' "$lines" | jq -Rs --argjson pub "$published_json" --slurpfile old "$STATE_FILE" '
-  def candidates:
+  def apk_name: (. | ascii_downcase) + ".apk";
+  def module_name:
+    ((. | sub("^(?<pre>.+?)-v(?<d>[0-9])"; .pre + "-module-v" + .d) | ascii_downcase) + ".zip");
+  def live_kinds($names):
     . as $s
-    | [ ($s | ascii_downcase) + ".apk",
-        (($s | sub("^(?<pre>.+?)-v(?<d>[0-9])"; .pre + "-module-v" + .d) | ascii_downcase) + ".zip") ];
+    | [ (if ($names | has($s | apk_name)) then "apk" else empty end),
+        (if ($names | has($s | module_name)) then "module" else empty end) ];
+  def old_kinds: if type == "object" then (.kinds // []) else [] end;
   ($pub | map(ascii_downcase) | INDEX(.)) as $shipped
   | ($old[0] // {}) as $old_state
   | (split("\n") | map(select(length > 0)) | map(split("\t"))
       | map(select((length == 3) and (.[0] == "stable" or .[0] == "beta")))
       | reduce .[] as $p ({};
-          if (any($p[1] | candidates[]; . as $f | ($shipped | has($f))))
-             or (($old_state[$p[0]] // {}) | has($p[1]))
-          then .[$p[0]] = ((.[$p[0]] // {}) + { ($p[1]): $p[2] })
+          ($p[1] | live_kinds($shipped)) as $live
+          | (($old_state[$p[0]] // {}) | .[$p[1]]) as $prev
+          | if (($live | length) > 0) or ($prev != null)
+          then .[$p[0]] = ((.[$p[0]] // {}) + {
+                 ($p[1]): { hash: $p[2],
+                            kinds: ((($prev | old_kinds) + $live) | unique) } })
           else . end)) as $new
   | ($old_state * $new)
 '

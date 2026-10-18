@@ -76,19 +76,38 @@ an identical APK under a new build number falsely notifies every updater
   handling, so a match terminates the whole table build — the module stage is
   never patched or packed, nothing lands in `build/`, and no `write_build_info`
   fragment is written, so notes and manifest need no post-hoc filtering.
+  A match is only half the verdict: it must also cover **every kind this build
+  was asked to publish** (`build_mode_arr` is passed in). Without that, flipping
+  `build-mode = "both"` on an app whose APK bytes are unchanged would re-produce
+  a matching APK forever, suppress the module the maintainer actually asked for,
+  and let the build job record the missing kind as built — the suppression would
+  be permanent and silent. The verdict stays all-or-nothing per app+arch: one
+  artifact kind is never published without the other, so no partial release.
 - **Reference:** `state/build_content_hashes.json` on `data`, keyed
-  `channel → "<prefix>-v<version>-<arch>" → md5`. It is build bookkeeping,
-  not metadata: `build.json`, the numbered manifest and the website contract
-  gain no keys. The engine only ever updates the local copy (enforce mode, so
-  the two arches of one run agree); CI publishes it after the upload chain
-  succeeded, and the merge additionally refuses a recorded stem whose artifact
-  never reached `build/` — the patch-time record must not outrun a later
-  per-app failure (a run can fail an app after hashing it; the state has never
-  actually held such an entry, but nothing prevented one until this filter).
-  A hash becomes authoritative only when its own artifact is live.
-  Lifecycle: `cleanup_artifact_hashes.sh` drops any entry whose file is gone
-  from all releases, so a suppression guard never outlives the artifact it
-  vouches for (see [ci-pipelines.md](ci-pipelines.md)).
+  `channel → "<prefix>-v<version>-<arch>" → {hash, kinds}` — the fingerprint, and
+  the artifact kinds proven live for that stem. A bare md5 value (written before
+  kinds were tracked) reads as *kinds unknown* and therefore **cannot justify a
+  skip**: the polarity is the opposite of `built_shape`'s missing-baseline rule on
+  purpose, because a duplicate skip is destructive and terminal while one extra
+  publish is only noise. It is build bookkeeping, not metadata: `build.json`, the
+  numbered manifest and the website contract gain no keys. The engine only ever
+  updates the local copy (enforce mode, so the two arches of one run agree), and
+  its kinds are this build's *request*, provisional within the run; CI publishes
+  after the upload chain succeeded, and `build_merge_hashes.sh` — not the engine —
+  decides which kinds are credited, per filename spelling that actually reached
+  `build/`. The merge additionally refuses a recorded stem whose artifact never
+  reached `build/` — the patch-time record must not outrun a later per-app failure
+  (a run can fail an app after hashing it; the state has never actually held such
+  an entry, but nothing prevented one until this filter). A hash becomes
+  authoritative only when its own artifact is live.
+  Lifecycle: `cleanup_artifact_hashes.sh` is the only reader of real liveness, so
+  it is the only place a kind may be removed — and the only place one may be
+  re-proved. An entry keeps exactly the kinds whose spelling still has a live
+  asset and is dropped whole when none survives, so a suppression guard never
+  outlives the artifact it vouches for (see
+  [ci-pipelines.md](ci-pipelines.md)). Because trimming a kind leaves the *key
+  count* unchanged, that step compares parsed documents, not counts, to decide
+  whether its rewrite is worth keeping.
 - **Scopes:** CI-only (`GITHUB_REPOSITORY` set), revanced/morphe tools only
   (`PATCHER_HASH_DEDUP_ELIGIBLE` in the patchers registry — cross-run hash
   stability for the other tools is unmeasured), `python3` present, channel

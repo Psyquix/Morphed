@@ -136,7 +136,10 @@ Step order, with the reason each is where it is:
    step consumes. An app whose freshly patched APK matches its published
    fingerprint (`state/build_content_hashes.json`, `RVB_DEDUP_MODE=enforce`) is
    skipped before module packaging and recorded under `temp/unchanged/` — a
-   skip, not a failure; it never reaches the failure report.
+   skip, not a failure; it never reaches the failure report. The match only
+   suppresses when every artifact kind the build was asked to publish is already
+   live on the record, and a bare-md5 entry (kinds unknown) never suppresses at
+   all — see [build-engine.md](build-engine.md).
 7b. **Report build failures** (`build_report_failures.sh`, `if: always()`,
    `continue-on-error`): reads `temp/failures/`, uploads each build log to
    `xi.pe`, and posts ONE batched Markdown message to the failure topic
@@ -207,7 +210,11 @@ Step order, with the reason each is where it is:
     stage after it (module packing, stock merge) can still fail while the run
     overall succeeds — without this filter a failed build would seed a
     fingerprint for a file nobody published. A hash becomes authoritative
-    exactly when its artifact is live, per app, not per run.
+    exactly when its artifact is live, per app, not per run. Kinds are credited
+    the same way and **per spelling**: the entry keeps the kinds it already
+    recorded plus `apk`/`module` for whichever of the two filenames reached
+    `build/` this run, so a run whose module zip failed to pack cannot mint the
+    evidence that would suppress a module later.
     `commit_data_branch.sh` then pushes the state file to `data` (only when the
     merge changed it; a failed data push is a warning, not a failure — the next
     run's fetch converges and the worst case is one redundant republish).
@@ -227,11 +234,16 @@ Step order, with the reason each is where it is:
 3. `cleanup_update_branch.sh` drops update pointers and changelogs whose release is
    gone; `cleanup_website_branch.sh` drops `manifests/<tag>.json` for deleted
    releases.
-3b. `cleanup_artifact_hashes.sh` drops `state/build_content_hashes.json` entries
-   whose artifact no longer lives on ANY release (matching both the `<stem>.apk`
-   and `<…>-module-v<…>.zip` spellings, case-insensitively). This is a guard on
-   the duplicate-build check, not tidying: an entry is the evidence that lets a
-   rebuild be suppressed, so evidence for a deleted file must go with the file —
+3b. `cleanup_artifact_hashes.sh` prunes `state/build_content_hashes.json` against
+   what actually lives on the releases (matching the `<stem>.apk` and
+   `<…>-module-v<…>.zip` spellings, case-insensitively) — per spelling, so each one
+   proves its own kind: an entry keeps exactly the kinds still downloadable and is
+   dropped entirely when none survives. Being the only reader of real liveness, it
+   is also the only place a lost kind can be re-proved, and it upgrades a bare-md5
+   entry to `{hash, kinds}` from the asset names rather than leaving it unknown.
+   This is a guard on the duplicate-build check, not tidying: an entry is the
+   evidence that lets a rebuild be suppressed, so evidence for a deleted file must
+   go with the file —
    otherwise a pinned rebuild would be "skipped" as identical to something
    nobody can download. It runs **after** the asset deleters so entries pruned
    in the same pass lose their guard in that pass; a failed releases listing

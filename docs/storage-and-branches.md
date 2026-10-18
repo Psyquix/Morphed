@@ -35,8 +35,12 @@ state/
   patch_sources.json          per source: host, repo, stable tag+date, beta tag+date, blocked
   app_versions.json           app: {keys: […], version}; "_check_only_listed": true
   patch_file_hashes.json      source → channel → package → bundle content hash
-  build_content_hashes.json   channel → built-artifact key → content md5 (duplicate-build
-                              check; written by the build job after a successful upload)
+  build_content_hashes.json   channel → built-artifact key → {hash, kinds}: the content
+                              md5 and the artifact kinds proven live for that stem
+                              (duplicate-build check; the build job writes it after a
+                              successful upload, and cleanup trims the kinds it can no
+                              longer find on a release). A bare md5 value is a
+                              kinds-unknown legacy entry and suppresses nothing.
   built_shape.json            channel → app key → arch list last successfully built (or
                               seeded at migration); lets the watcher spot new apps/arches
   pending_builds.json         channel → app key → {reason, arches, attempts, parked}; the
