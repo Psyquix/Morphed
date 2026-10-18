@@ -289,7 +289,8 @@ fi
 jqx -c '[.stable | to_entries[] | select(.value.parked != true) | .key]' <<<"$pb" >pending.stable.json
 jqx -c '[.beta | to_entries[] | select(.value.parked != true) | .key]' <<<"$pb" >pending.beta.json
 
-# The apps added THIS run, per channel, for ci_notify_new_apps.sh (empty otherwise).
+# The apps added THIS run, per channel, for ci_notify_announcements.sh (empty
+# otherwise).
 printf '%s\n' "$newjson" >new_apps.json
 
 # And the apps whose tracked config moved, with the field diff to show for it.
