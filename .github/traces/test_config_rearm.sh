@@ -330,6 +330,24 @@ run_case wake_announced_once "$CFG_BOTH" "$OUT_STATE" "$SEED_X"
 [[ "$(jqx -r '.stable["App-x"].attempts' <<<"$OUT_STATE")" == "0" ]] ||
 	fail "case20 run2 spent a retry budget it did not earn: $OUT_STATE"
 
+# --- 22. a new arch on an existing app is a widening, not a new app ----------
+# The entry is there and one ABI was never produced, so `need` is non-empty exactly as
+# for a brand-new app — which is why both used to land in new_apps.json. A reader of the
+# announcement topic does not care about the difference; a reader looking for the new
+# app they added does, so the two must not share a reason.
+SEED_ARM64="{\"stable\":{\"App-x\":{\"arches\":[\"arm64-v8a\"],\"cfg\":$BASE_MAP}},\"beta\":{}}"
+run_case arch_widening "$STABLE_CFG" '{"stable":{},"beta":{}}' "$SEED_ARM64"
+[[ "$OUT_PENDING" == '["App-x"]' ]] || fail "case22 widening not queued: $OUT_PENDING"
+[[ "$(jqx -r '.stable["App-x"].reason' <<<"$OUT_STATE")" == "config" ]] ||
+	fail "case22 wrong reason (must not be 'new'): $OUT_STATE"
+[[ "$(jqx -c '.stable["App-x"].arches' <<<"$OUT_STATE")" == '["arm-v7a"]' ]] ||
+	fail "case22 queued more arches than are missing: $OUT_STATE"
+[[ "$OUT_NEWAPPS" == '{"stable":[],"beta":[]}' ]] ||
+	fail "case22 announced an existing app as new: $OUT_NEWAPPS"
+[[ "$(jqx -c '.stable["App-x"]' <<<"$(jqx -c . <<<"$OUT_CHANGED")")" == \
+	'[{"field":"arch","from":"arm64-v8a","to":"arm-v7a, arm64-v8a"}]' ]] ||
+	fail "case22 no expanded arch delta: $OUT_CHANGED"
+
 # --- 21. the shell list and the compiler's mirror agree -----------------------
 # compile_patch_configs.py copies these lists so the shell stays stdlib and it can
 # reject an unknown key without spawning anything. A copy without a check is how two

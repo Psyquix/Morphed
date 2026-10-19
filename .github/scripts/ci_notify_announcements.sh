@@ -81,6 +81,59 @@ host_base() {
 	*) printf 'https://github.com/' ;;
 	esac
 }
+# field_label <config-key> — the key as a sentence label, so a change line reads
+# `Build Mode: apk -> both` in the same grammar as `Arch:` / `Package:` above it
+# rather than as a line of TOML. Unknown keys fall back to hyphen-to-space title
+# casing, so a key added later still renders instead of printing raw.
+field_label() {
+	case "${1:-}" in
+	patches-source) printf 'Patches Source' ;;
+	patches-source-host) printf 'Patches Host' ;;
+	patches-version) printf 'Patches Version' ;;
+	cli-source) printf 'Patcher' ;;
+	cli-source-host) printf 'Patcher Host' ;;
+	cli-version) printf 'Patcher Version' ;;
+	included-patches) printf 'Included Patches' ;;
+	excluded-patches) printf 'Excluded Patches' ;;
+	exclusive-patches) printf 'Exclusive Patches' ;;
+	inclusive-patches) printf 'Inclusive Patches' ;;
+	pkg-name) printf 'Package' ;;
+	app-name) printf 'Name' ;;
+	enable-module-update) printf 'Module Update' ;;
+	*)
+		printf '%s' "${1:-}" | awk -F- '{
+			for (i = 1; i <= NF; i++) {
+				if ($i != "") {
+					printf("%s%s%s", toupper(substr($i, 1, 1)), substr($i, 2),
+						i < NF ? " " : "")
+				}
+			}
+		}'
+		;;
+	esac
+}
+# app_head <app-key> — the app's identity line, shared by both sections on purpose:
+# "📱 Name (brand • variant • sub-variant)", the exact form the new-apps notice has
+# always used. Two renderings of one block is how they would drift.
+app_head() {
+	local key=$1 cfg name brand variant subvariant label part out
+	cfg=$(app_cfg "$key")
+	name=$(jqx -r --arg k "$key" '.[$k]["app-name"] // $k' "$cfg")
+	brand=$(jqx -r --arg k "$key" '.[$k].brand // empty' "$cfg")
+	variant=$(jqx -r --arg k "$key" '.[$k].variant // empty' "$cfg")
+	subvariant=$(jqx -r --arg k "$key" '.[$k]["sub-variant"] // empty' "$cfg")
+	label=""
+	for part in "$brand" "$variant" "$subvariant"; do
+		if [ -n "$part" ]; then
+			label="${label:+${label} • }${part}"
+		fi
+	done
+	out="📱 $(md_clean "$name")"
+	if [ -n "$label" ]; then
+		out+=" ($(md_clean "$label"))"
+	fi
+	printf '%s' "$out"
+}
 # app_cfg <app-key> — the pool file to read this app's metadata from (stable first).
 app_cfg() {
 	local key=$1 cfg="config.stable.json"
@@ -88,13 +141,6 @@ app_cfg() {
 		cfg="config.beta.json"
 	fi
 	printf '%s' "$cfg"
-}
-# app_name <app-key> — display name, falling back to the key rather than inventing one.
-app_name() {
-	local cfg
-	cfg=$(app_cfg "$1")
-	[ -f "$cfg" ] || { printf '%s' "$1"; return 0; }
-	jqx -r --arg k "$1" '.[$k]["app-name"] // $k' "$cfg"
 }
 
 new_blocks=""
@@ -115,25 +161,14 @@ if [ "${new_count:-0}" -gt 0 ]; then
 
 		cfg=$(app_cfg "$key")
 		[ -f "$cfg" ] || cfg="config.stable.json"
-		name=$(jqx -r --arg k "$key" '.[$k]["app-name"] // $k' "$cfg")
-		brand=$(jqx -r --arg k "$key" '.[$k].brand // empty' "$cfg")
-		variant=$(jqx -r --arg k "$key" '.[$k].variant // empty' "$cfg")
-		subvariant=$(jqx -r --arg k "$key" '.[$k]["sub-variant"] // empty' "$cfg")
 		pkg=$(jqx -r --arg k "$key" '.[$k]["pkg-name"] // empty' "$cfg")
 		psrc=$(jqx -r --arg k "$key" '.[$k]["patches-source"] // empty' "$cfg" | tr -d "\"'" | head -n1 | awk '{print $1}')
 		phost=$(jqx -r --arg k "$key" '.[$k]["patches-source-host"] // "github"' "$cfg" | head -n1 | awk '{print $1}')
 		arch=$(retry_effective_arch "$cfg" "$key" | tr -s '[:space:]' '\n' | LC_ALL=C sort -u | sed '/^$/d' | paste -sd ',' - | sed 's/,/, /g')
 
-		# Parenthetical = every identity part that exists, joined by " • ":
-		# brand, variant, sub-variant (e.g. "Piko • NewX • Material You").
-		label=""
-		for part in "$brand" "$variant" "$subvariant"; do
-			if [ -n "$part" ]; then
-				label="${label:+${label} • }${part}"
-			fi
-		done
-		block="📱 $(md_clean "$name")"
-		if [ -n "$label" ]; then block+=" ($(md_clean "$label"))"; fi
+		# Parenthetical = every identity part that exists, joined by " • " — via the
+		# same app_head the config-change section uses, so the two can never disagree.
+		block=$(app_head "$key")
 		if [ -n "$psrc" ]; then block+="${NL}  ╰ Patches: [$(md_clean "$psrc")]($(host_base "$phost")$(md_clean "$psrc"))"; fi
 		if [ -n "$pkg" ]; then block+="${NL}  ╰ Package: \`${pkg}\`"; fi
 		block+="${NL}  ╰ Arch: ${arch:-arm-v7a, arm64-v8a} · Channel: ${ch}"
@@ -147,8 +182,7 @@ if [ "${chg_count:-0}" -gt 0 ]; then
 		[ -z "$line" ] && continue
 		ch=${line%%$'\t'*}
 		key=${line#*$'\t'}
-		name=$(app_name "$key")
-		block="🔧 $(md_clean "$name")${NL}"
+		block=$(app_head "$key")${NL}
 		while IFS= read -r frag; do
 			[ -z "$frag" ] && continue
 			field=$(printf '%s' "$frag" | jqx -r '.field')
@@ -156,12 +190,13 @@ if [ "${chg_count:-0}" -gt 0 ]; then
 			to=$(printf '%s' "$frag" | jqx -c '.to')
 			fv=$(md_val "$from")
 			tv=$(md_val "$to")
+			label=$(field_label "$field")
 			if [ -z "$fv" ]; then
-				block+="  ╰ ${field}: +${tv}${NL}"
+				block+="  ╰ ${label}: +${tv}${NL}"
 			elif [ -z "$tv" ]; then
-				block+="  ╰ ${field}: -${fv}${NL}"
+				block+="  ╰ ${label}: -${fv}${NL}"
 			else
-				block+="  ╰ ${field}: ${fv} → ${tv}${NL}"
+				block+="  ╰ ${label}: ${fv} → ${tv}${NL}"
 			fi
 		done < <(jqx -c --arg c "$ch" --arg k "$key" '.[$c][$k] // [] | .[]' "$CA")
 		if [ "$ch" = "beta" ]; then
@@ -194,7 +229,7 @@ fi
 # The leading mark follows what actually happened: a run that only woke an existing
 # app is not a "new" thing, and greeting it with 🆕 would repeat the very conflation
 # this section exists to remove.
-mark="🔧"
+mark="🪸"
 if [ "${new_count:-0}" -gt 0 ]; then mark="🆕"; fi
 MSG+="${NL}${NL}${mark} ${tail}.${NL}🔗 [Download from NullStore](${WEB_LINK})."
 

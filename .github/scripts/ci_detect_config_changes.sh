@@ -82,6 +82,7 @@ process_channel() { # $1=channel $2=config-file
 
 	local apps cfg_count bs_count first_run key want want_arr bs_arr pend_json pend_arches kept need added fp rearmed present gone
 	local have_cfg want_cfg cdiff cdiff_other cfg_known want_k have_k widened moved prev_cfg
+	local is_new wake
 	apps=$(retry_list_apps "$cfg")
 	cfg_count=$(printf '%s\n' "$apps" | grep -c . || true)
 	bs_count=$(jqx -r --arg c "$ch" '(.[$c] // {}) | length' <<<"$bs")
@@ -168,14 +169,34 @@ process_channel() { # $1=channel $2=config-file
 
 		pend_json=$(jqx -c --arg c "$ch" --arg k "$key" '.[$c][$k]' <<<"$pb")
 		if [ "$pend_json" = "null" ]; then
-			# Not already queued: enqueue only genuinely-new arches (never built).
+			# Not already queued: arches never built, and/or a tracked field that moved.
 			need=$(jqx -cn --argjson want "$want_arr" --argjson have "$bs_arr" '$want - $have')
 			added=$(jqx -r 'length' <<<"$need")
-			if [ "${added:-0}" -gt 0 ]; then
+			# A brand-new app and an existing app asking for one more arch are different
+			# events that used to wear the same clothes: only the first is an addition
+			# anybody should hear about as a new app.
+			is_new=$(jqx -r --arg c "$ch" --arg k "$key" '((.[$c][$k] // null) == null)' <<<"$bs")
+			if [ "$is_new" = "true" ] && [ "${added:-0}" -gt 0 ]; then
 				fp=$(retry_fingerprint "$cfg" "$key")
 				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$need" --arg fp "$fp" \
 					'.[$c][$k] = {reason:"new", arches:$a, attempts:0, parked:false, cfg:$fp}' <<<"$pb")
 				newjson=$(jqx -c --arg c "$ch" --arg k "$key" '(.[$c] // []) += [$k]' <<<"$newjson")
+				trigger=1
+			elif [ "${added:-0}" -gt 0 ]; then
+				# An existing app asking for an arch it has never produced is a widening,
+				# not an addition: queue just the missing arches and name the delta in the
+				# notice, expanded to concrete ABIs like every other arch value in this
+				# message rather than left as the raw `both`/`auto` keyword.
+				wake=$(jqx -cn \
+					--arg from "$(printf '%s' "$bs_arr" | jqx -r 'join(", ")')" \
+					--arg to "$(printf '%s' "$want_arr" | jqx -r 'join(", ")')" \
+					'[{field:"arch", from:$from, to:$to}]')
+				fp=$(retry_fingerprint "$cfg" "$key")
+				pb=$(jqx -c --arg c "$ch" --arg k "$key" --argjson a "$need" --arg fp "$fp" \
+					'.[$c][$k] = {reason:"config", arches:$a, attempts:0, parked:false, cfg:$fp}' <<<"$pb")
+				changedjson=$(jqx -c --arg c "$ch" --arg k "$key" --argjson d "$wake" \
+					'(.[$c] // {})[$k] = $d' <<<"$changedjson")
+				echo "Arch widening for '$key' ($ch): $(printf '%s' "$wake" | jqx -r 'map("\(.field): \(.from) -> \(.to)") | join(", ")')"
 				trigger=1
 			elif [ "$cfg_known" != true ]; then
 				# No baseline yet: take the current one and ask for nothing. This is the

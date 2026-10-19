@@ -114,7 +114,13 @@ first notices the change, on the same announcement topic as new apps — because
 maintainer who edited a config and sees a build appear with no word about why cannot
 tell "my edit worked" from "my edit was ignored", which is how this went unnoticed.
 An app woken by a config change is announced as a change, never as "New App(s)
-Added". The announcement fires once: a queue entry that already carries the new
+Added". That distinction now runs one level deeper: `reason: "new"` means the app had
+no `built_shape` record at all, where before it also covered an existing app that
+newly asked for one more arch — so an app in the catalogue for a year could be
+announced as an addition. Widening is a config change like any other, reported as
+`Arch: arm64-v8a → arm-v7a, arm64-v8a` with the ABIs expanded per the existing rule
+that routing keywords are never shown raw. The announcement fires once: a queue entry
+that already carries the new
 fingerprint keeps the app in the pool but stays quiet, or every scheduled run until
 the build succeeded would re-announce one edit and the topic would stop meaning
 "something changed just now".
