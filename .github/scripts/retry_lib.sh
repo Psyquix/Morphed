@@ -75,48 +75,48 @@ retry_effective_arch() {
 
 # The config keys whose value decides WHAT an artifact is built from, or WHETHER it
 # is built at all. This is the one list — the watcher diffs it, the build job
-# records it, and the trace suite asserts every key seen in a compiled config is
-# either listed here or in the ignore list, so a new TOML key cannot silently join
-# the class of "edits a maintainer thinks cost a build but that cost nothing".
+# records it, and the trace suite asserts (a) every key CONFIG.md documents is either
+# here or in the ignore list, and (b) the list agrees with the one in
+# compile_patch_configs.py, so a new TOML key cannot silently join the class of "edits
+# a maintainer thinks cost a build but that cost nothing".
 #
-# Deliberately NOT here:
+# Membership is not a judgement call: every key below is one a script actually reads
+# (`toml_get "$t"` / `toml_get "$main_config_t"` in scripts/build.sh, or named in
+# ci_check_app_patches.py / scripts/utils.sh). Upstream ReVanced Manager has keys this
+# builder does not — `mount-*`, `compress-module-files`, `override-version-code`,
+# `use-prebuilt-apks` — and none of them belongs here: a tracked key that no code reads
+# would claim credit for changes that cannot happen.
+#
+# Deliberately NOT tracked:
 #   * every `*-dlurl` — transport. The same version/versionCode/arch artifact is
 #     fetched from whichever store answers; if a store ever serves different bytes,
-#     the build's own content fingerprint says so on the next real build.
+#     the build's own content hash says so on the next real build.
 #   * `enabled` — membership, not a diff: the base compiler expresses `false` by
-#     omitting the app, and the queue prune handles its return.
-#   * `folder-name` — a typo no code reads (the real key is `patch-folder`).
+#     omitting the app entirely, and the queue prune handles its return.
+#   * `author`, `author-page` — read from a config's file-level defaults only
+#     (build.sh takes them from `main_config_t`, never from an app block), so an edit
+#     inside an app entry changes nothing.
+# A key no code reads at all (the historical `folder-name`) is not listed here: the
+# compiler rejects it outright, which is the only thing that could have made the typo
+# visible in the first place.
 retry_tracked_keys() {
 	printf '%s\n' \
 		patches-source patches-source-host patches-version patch-folder \
 		cli-source cli-source-host cli-version \
 		brand variant sub-variant app-name pkg-name patched-pkg-name \
 		included-patches excluded-patches exclusive-patches inclusive-patches \
-		patcher-args arch build-mode version version-code override-version-code \
-		dpi include-stock compression-level compress-module-files \
-		remove-rv-integrations-checks \
-		mount-routing mount-secure-filesystem mount-app-storage mount-data-storage \
-		fdroid-index github-release-regex github-regex \
+		patcher-args arch build-mode version version-code \
+		dpi include-stock compression-level remove-rv-integrations-checks \
+		github-release-regex github-regex \
 		module-prop-name enable-module-update
 }
 
-# Keys a compiled config may carry that are DELIBERATELY not tracked, so the
-# classification can be checked for completeness (trace case 19) instead of
-# assumed. `*-dlurl` is matched by suffix, not by name, so a new store cannot slip in
-# as an unclassified key.
-#
-#   *-dlurl                  transport; see the note on retry_tracked_keys.
-#   enabled                  membership: the base compiler expresses `false` by
-#                            omitting the app, and the queue prune handles the rest.
-#   use-prebuilt-apks        local-dev input; no CI config carries it.
-#   folder-name              a typo no code reads (the real key is `patch-folder`).
-#   author, author-page      read from a config's FILE-LEVEL defaults only
-#                            (build.sh takes them from `main_config_t`, never from an
-#                            app block), so editing them in an app entry changes
-#                            nothing. A file-level change is a repo-wide identity
-#                            move, not a per-app build request.
+# Keys a compiled config may carry that the builder DOES read but which must never
+# wake an app. Listed so the completeness check can prove they were considered rather
+# than forgotten; `*-dlurl` is matched by suffix, not by name, so a new store cannot
+# slip in as an unclassified key.
 retry_ignored_keys() {
-	printf '%s\n' enabled use-prebuilt-apks folder-name author author-page
+	printf '%s\n' enabled author author-page
 }
 
 # retry_tracked_key <name> / retry_ignored_key <name> — is this key classified?

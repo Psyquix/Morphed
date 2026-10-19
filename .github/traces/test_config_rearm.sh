@@ -330,4 +330,41 @@ run_case wake_announced_once "$CFG_BOTH" "$OUT_STATE" "$SEED_X"
 [[ "$(jqx -r '.stable["App-x"].attempts' <<<"$OUT_STATE")" == "0" ]] ||
 	fail "case20 run2 spent a retry budget it did not earn: $OUT_STATE"
 
+# --- 21. the shell list and the compiler's mirror agree -----------------------
+# compile_patch_configs.py copies these lists so the shell stays stdlib and it can
+# reject an unknown key without spawning anything. A copy without a check is how two
+# files start disagreeing, so the equality is asserted where both are already loaded.
+# Normalise both sides through the same function: the shell list arrives newline
+# separated and the python list space separated, and comparing the raw text would
+# fail on that alone.
+keyset() { printf '%s' "$1" | tr -s '[:space:]' '\n' | LC_ALL=C sort | tr '\n' ' '; }
+sh_tracked=$(keyset "$(retry_tracked_keys)")
+sh_ignored=$(keyset "$(retry_ignored_keys)")
+# Import by running from the scripts dir: a Git Bash path (/c/Users/...) means nothing
+# to a Windows python, so sys.path juggling would work in CI and fail on a laptop.
+py_lists=$(cd "$REPO/.github/scripts" && python3 -c "
+import compile_patch_configs as c
+print(' '.join(sorted(c.TRACKED_KEYS)))
+print(' '.join(sorted(c.UNTRACKED_KEYS)))
+") || fail "could not import compile_patch_configs"
+[ "$(keyset "$(printf '%s\n' "$py_lists" | sed -n 1p)")" = "$sh_tracked" ] ||
+	fail "tracked keys disagree between retry_lib.sh and compile_patch_configs.py
+  shell: $sh_tracked
+  py   : $(keyset "$(printf '%s\n' "$py_lists" | sed -n 1p)")"
+[ "$(keyset "$(printf '%s\n' "$py_lists" | sed -n 2p)")" = "$sh_ignored" ] ||
+	fail "untracked keys disagree
+  shell: $sh_ignored
+  py   : $(keyset "$(printf '%s\n' "$py_lists" | sed -n 2p)")"
+# And a key that is read by no code must be accepted by neither list — otherwise the
+# guard would wave it through again.
+for ghost in folder-name mount-routing use-prebuilt-apks fdroid-index override-version-code; do
+	if retry_tracked_key "$ghost" || retry_ignored_key "$ghost"; then
+		fail "$ghost is classified although no code reads it"
+	fi
+	[ "$(cd "$REPO/.github/scripts" && python3 -c "
+import compile_patch_configs as c
+print('ok' if c.unknown_key('$ghost') is None else 'rejected')")" = "rejected" ] ||
+		fail "$ghost is accepted by the compiler although no code reads it"
+done
+
 echo "CONFIG RE-ARM TESTS: PASS"

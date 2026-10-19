@@ -34,6 +34,55 @@ except ImportError:
         print("Error: neither tomllib nor tomli is available.", file=sys.stderr)
         sys.exit(1)
 
+# Every config key the builder and the watcher understand. The list was taken from
+# what the code actually reads (`toml_get "$t"` / `toml_get "$main_config_t"` in
+# scripts/build.sh, plus `patch-folder` in ci_check_app_patches.py), not from what
+# upstream ReVanced Manager documents — that distinction matters: mount-*,
+# compress-module-files, override-version-code, use-prebuilt-apks and fdroid-index are
+# all real upstream names or real temp-file names here, and none of them is a key this
+# builder reads, so accepting them would have let a typo pass as valid.
+#
+# An unrecognised key is a hard error rather than something silently carried into the
+# published pool, because a misspelled key is otherwise invisible forever:
+# `folder-name = "terabox"` sat in a live config for months while the real bypass is
+# named `patch-folder`, and nothing — not the build, not the failure report, not the
+# notification — had any way to say so.
+#
+# The authoritative list of the keys that DECIDE a rebuild lives in
+# `.github/scripts/retry_lib.sh` (`retry_tracked_keys` / `retry_ignored_keys`). This
+# mirrors it so the shell stays stdlib-only and the compiler needs no subprocess, and
+# `.github/traces/test_config_rearm.sh` fails if the two ever disagree.
+TRACKED_KEYS = frozenset({
+    "patches-source", "patches-source-host", "patches-version", "patch-folder",
+    "cli-source", "cli-source-host", "cli-version",
+    "brand", "variant", "sub-variant", "app-name", "pkg-name", "patched-pkg-name",
+    "included-patches", "excluded-patches", "exclusive-patches", "inclusive-patches",
+    "patcher-args", "arch", "build-mode", "version", "version-code", "dpi",
+    "include-stock", "compression-level", "remove-rv-integrations-checks",
+    "github-release-regex", "github-regex", "module-prop-name",
+    "enable-module-update",
+})
+# Read by the builder, but never a reason to rebuild (see retry_ignored_keys).
+UNTRACKED_KEYS = frozenset({"enabled", "author", "author-page"})
+
+
+def unknown_key(key):
+    """Return None when `key` is recognised, else why it is not.
+
+    Download URLs are accepted by suffix rather than by name, so a newly added store
+    cannot arrive as an unclassified key. The suggestion is a prefix match, never a
+    guess at what the author meant: a misspelled value must still fail, and the
+    near-miss exists only to save a lookup of the docs.
+    """
+    if key in TRACKED_KEYS or key in UNTRACKED_KEYS:
+        return None
+    if key.endswith("-dlurl"):
+        return None
+    near = sorted({k for group in (TRACKED_KEYS, UNTRACKED_KEYS) for k in group
+                   if k[:3] == key[:3]})
+    return ("not a config key the builder reads"
+            + ("; did you mean one of: " + ", ".join(near[:4]) if near else ""))
+
 
 def normalize_channel(val):
     """Canonicalize a patches-version value to "stable"/"beta"/"both", or return a
@@ -62,10 +111,13 @@ def compile_configs(patches_dir="configs/patches"):
     if not toml_files:
         print(
             f"Warning: No TOML files found in {patches_dir}", file=sys.stderr)
-        return stable_pool, beta_pool
+        return stable_pool, beta_pool, []
 
     seen_stable = {}
     seen_beta = {}
+    # Collected, not raised on the spot: one run should report every bad key in every
+    # file, not make the maintainer fix one, re-run, and find the next.
+    problems = []
 
     for filepath in toml_files:
         filename = os.path.basename(filepath)
@@ -80,6 +132,12 @@ def compile_configs(patches_dir="configs/patches"):
         file_defaults = {k: v for k,
                          v in data.items() if not isinstance(v, dict)}
 
+        for key in file_defaults:
+            why = unknown_key(key)
+            if why:
+                problems.append(
+                    f"{filename}: file-level key '{key}' is {why}")
+
         # Resolve file-level channel default (default is "stable" if omitted)
         file_pv = normalize_channel(file_defaults.get("patches-version"))
         if not file_pv:
@@ -91,6 +149,12 @@ def compile_configs(patches_dir="configs/patches"):
         for app_key, app_table in data.items():
             if not isinstance(app_table, dict):
                 continue
+
+            for key in app_table:
+                why = unknown_key(key)
+                if why:
+                    problems.append(
+                        f"{filename}: [{app_key}] key '{key}' is {why}")
 
             merged = dict(file_defaults)
             merged.update(app_table)
@@ -150,12 +214,23 @@ def compile_configs(patches_dir="configs/patches"):
                     entry.pop("patches-version", None)
                 beta_pool[app_key] = entry
 
-    return stable_pool, beta_pool
+    return stable_pool, beta_pool, problems
 
 
 def main():
     patches_dir = sys.argv[1] if len(sys.argv) > 1 else "configs/patches"
-    stable_pool, beta_pool = compile_configs(patches_dir)
+    stable_pool, beta_pool, problems = compile_configs(patches_dir)
+
+    # Before anything is written: an invalid config must leave the previous pools
+    # standing rather than publishing a pool built from keys nobody reads.
+    if problems:
+        print(f"Error: {len(problems)} unrecognised config key(s):",
+              file=sys.stderr)
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+        print("Fix the key or remove it; a config key that no code reads is silently "
+              "ignored today and would be a silent no-op forever.", file=sys.stderr)
+        sys.exit(1)
 
     stable_out = {"patches-version": "stable"}
     stable_out.update(stable_pool)

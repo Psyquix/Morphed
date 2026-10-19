@@ -153,20 +153,23 @@ last built from is recorded per app in `state/built_shape.json` (why:
   `patches-version`, `patch-folder`, `cli-source`, `cli-source-host`, `cli-version`,
   `brand`, `variant`, `sub-variant`, `app-name`, `pkg-name`, `patched-pkg-name`,
   `included-patches`, `excluded-patches`, `exclusive-patches`, `inclusive-patches`,
-  `patcher-args`, `arch`, `build-mode`, `version`, `version-code`,
-  `override-version-code`, `dpi`, `include-stock`, `compression-level`,
-  `compress-module-files`, `remove-rv-integrations-checks`, the `mount-*` keys,
-  `fdroid-index`, `github-release-regex`, `github-regex`, `module-prop-name`,
-  `enable-module-update`.
+  `patcher-args`, `arch`, `build-mode`, `version`, `version-code`, `dpi`,
+  `include-stock`, `compression-level`, `remove-rv-integrations-checks`,
+  `github-release-regex`, `github-regex`, `module-prop-name`, `enable-module-update`.
 - **Editing these does not:** any `*-dlurl` — they choose *where* the same artifact is
   fetched from, and if a store ever serves different bytes the build's own content
   fingerprint says so on the next real build; `enabled` — turning an app off retires
   its queued retry, turning it back on rebuilds nothing unless a field above also
   moved; `author` and `author-page` — read from a file's top-level defaults only, never
-  from an app block; `use-prebuilt-apks` — local builds.
+  from an app block.
 - **`build-mode` and `arch` count only when they widen.** Asking for fewer artifacts
   than the last build produced queues nothing: no rebuild can un-publish what is
   already on the release.
+
+A key that no code reads is rejected when the configs are compiled, with the closest
+recognised names suggested — so `folder-name`, which this file never documented and
+which silently did nothing for as long as it sat in a live config, now fails the run
+instead of being ignored by it.
 
 A rebuild caused by your edit is announced with the field that moved
 (`build-mode: apk → both`), so a config change is never followed by silence.

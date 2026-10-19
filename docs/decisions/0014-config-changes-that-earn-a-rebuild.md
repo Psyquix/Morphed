@@ -65,7 +65,7 @@ artifact is built from, or whether it is built at all. The list lives once in
 | edit | rebuild? | why |
 |---|---|---|
 | patch source publishes a release; app version moves | ✅ as before | untouched by this record |
-| `patches-source`, `patches-version` (pin), `cli-source`, `patch-folder`, `included`/`excluded`/`exclusive`/`inclusive-patches`, `patcher-args`, `brand`/`variant`/`sub-variant`, `app-name`, `pkg-name`, `arch`, `build-mode`, `version`, `version-code`, `dpi`, `include-stock`, mount/module keys | ✅ new | the tracked map differs |
+| `patches-source`, `patches-version` (pin), `cli-source`, `patch-folder`, `included`/`excluded`/`exclusive`/`inclusive-patches`, `patcher-args`, `brand`/`variant`/`sub-variant`, `app-name`, `pkg-name`, `arch`, `build-mode`, `version`, `version-code`, `dpi`, `include-stock`, `compression-level`, `module-prop-name`, `enable-module-update` | ✅ new | the tracked map differs |
 | `both → apk` (a narrowing of `build-mode` or `arch`) | ❌ | no rebuild can un-publish; see below |
 | any `*-dlurl` | ❌ | transport: the same version/versionCode/arch artifact arrives from another store. If a store ever serves different bytes, the build's own content fingerprint says so on the next real build |
 | `enabled = false → true` | ❌ unless a tracked field also moved | see [0010](0010-config-change-pending-builds.md)'s prune: the queue entry is retired, the memory is kept, so a pure toggle describes an order that is already satisfied |
