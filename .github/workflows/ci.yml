@@ -175,16 +175,25 @@ jobs:
   trigger_notify_failure:
     needs: [check_patch, build_beta, build_stable]
     # `always()` is required, not stylistic: GitHub skips a job whose needed job was
-    # SKIPPED unless the condition starts from always(). A check_patch failure leaves
+    # SKIPPED unless the condition begins with always(). A check_patch failure leaves
     # both build jobs skipped, so a bare `failure()` never reached this job — the one
-    # failure that gates every build was the one that could not announce itself. Run
-    # 39261459573 died in "Compile Base Configs" and sent nothing.
+    # failure that gates every build was the one that announced nothing (run
+    # 39261459573, killed by a typo'd config key in "Compile Base Configs").
     #
-    # `contains(..., 'failure')` rather than `failure()` so an ordinary quiet night
-    # stays quiet: with nothing to build, build_beta is skipped on result 'skipped',
-    # which is not a failure. 'cancelled' is deliberately absent too — a superseded
-    # run is not news.
-    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    # Each result is named explicitly rather than via contains(needs.*.result,
+    # 'failure'): at JOB level the wildcard is a long-standing runner bug
+    # (actions/runner#1540, open since 2021) — the job-level condition does not see the
+    # same values the identical expression shows at step level, so it can decide either
+    # way depending on the dependency graph. Run 39261459573 skipped this job with a bare
+    # failure(); 39263204435 skipped it with the wildcard while check_patch was in
+    # 'failure'. Naming every need is also the form this workflow already proves works:
+    # trigger_cleanup below uses always() && named results and runs on nights where one
+    # build is skipped and the other succeeded.
+    #
+    # Matching 'failure' rather than '!= success' keeps the ordinary quiet night
+    # silent: with nothing to build, build_beta ends 'skipped', which is not a failure,
+    # and a cancelled run is not news either.
+    if: ${{ always() && (needs.check_patch.result == 'failure' || needs.build_beta.result == 'failure' || needs.build_stable.result == 'failure') }}
     uses: ./.github/workflows/notify.yml
     with:
       workflow_name: "CI"

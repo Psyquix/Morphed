@@ -88,15 +88,25 @@ forge answers again. The deliberate fail-open inside that check is recorded in
   `build` concurrency group therefore serialises every manifest merge against the
   `website` branch — two builders never merge at once.
 - `trigger_cleanup` runs on `always()` if either build succeeded.
-- `trigger_notify_failure` runs on `always() && contains(needs.*.result, 'failure')`.
-  The `always()` is load-bearing, not stylistic: GitHub skips a job whose needed job
-  was **skipped** unless the condition begins with `always()`, and a `check_patch`
-  failure leaves both build jobs skipped. Under a bare `failure()` that meant the one
-  failure which gates every build was the one that announced nothing (run
-  39261459573, killed by a typo'd config key in "Compile Base Configs"). Matching on
-  `failure` rather than on `!= 'success'` keeps the ordinary quiet night silent: with
-  nothing to build, `build_beta` ends `skipped`, which is not a failure — and a
-  `cancelled` run is not news either.
+- `trigger_notify_failure` runs on `always()` plus an explicit `== 'failure'` test on
+  each of `check_patch`, `build_beta` and `build_stable`. Two separate traps shaped
+  that line:
+  - `always()` is load-bearing, not stylistic. GitHub skips a job whose needed job was
+    **skipped** unless the condition begins with `always()`, and a `check_patch` failure
+    leaves both build jobs skipped. Under a bare `failure()` the one failure that gates
+    every build was the one that announced nothing (run 39261459573, killed by a typo'd
+    config key in "Compile Base Configs").
+  - The results are named one by one because `contains(needs.*.result, 'failure')` at
+    JOB level is unreliable — a runner bug open since 2021
+    ([actions/runner#1540](https://github.com/actions/runner/issues/1540)): a job-level
+    condition does not evaluate the wildcard from the same values the identical
+    expression shows at step level. Run 39263204435 carried that form and still skipped
+    the job while `check_patch` was in `failure`. `trigger_cleanup` two entries above
+    is the working precedent for the named form.
+
+  Comparing to `'failure'` rather than `!= 'success'` keeps the ordinary quiet night
+  silent: with nothing to build, `build_beta` ends `skipped`, which is not a failure —
+  and a `cancelled` run is not news either.
 - `ci_trigger_flags.sh` writes outputs with explicit `if` blocks rather than
   `[ … ] || [ … ] && var=` lists on purpose: under `set -e` a short-circuit list
   whose final command never runs exits non-zero and would kill the step *before*
