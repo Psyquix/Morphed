@@ -174,7 +174,17 @@ jobs:
 
   trigger_notify_failure:
     needs: [check_patch, build_beta, build_stable]
-    if: ${{ failure() }}
+    # `always()` is required, not stylistic: GitHub skips a job whose needed job was
+    # SKIPPED unless the condition starts from always(). A check_patch failure leaves
+    # both build jobs skipped, so a bare `failure()` never reached this job — the one
+    # failure that gates every build was the one that could not announce itself. Run
+    # 39261459573 died in "Compile Base Configs" and sent nothing.
+    #
+    # `contains(..., 'failure')` rather than `failure()` so an ordinary quiet night
+    # stays quiet: with nothing to build, build_beta is skipped on result 'skipped',
+    # which is not a failure. 'cancelled' is deliberately absent too — a superseded
+    # run is not news.
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
     uses: ./.github/workflows/notify.yml
     with:
       workflow_name: "CI"

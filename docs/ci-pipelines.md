@@ -10,7 +10,7 @@ GitHub's limits; notify reports failures.
 | [build.yml](../.github/workflows/build.yml) | Build | `workflow_call` only — from `ci.yml` (per pool) or `manual-ci.yml` | `build` |
 | [cleanup.yml](../.github/workflows/cleanup.yml) | Cleanup | `workflow_call`, `workflow_dispatch` | `clean` |
 | [manual-ci.yml](../.github/workflows/manual-ci.yml) | Manual CI | `workflow_dispatch` (config choice + optional `remove_apks`) | `ci` |
-| [notify.yml](../.github/workflows/notify.yml) | Notify | `issues`/`pull_request` (debounced batch), `workflow_call` (immediate, on `failure()` of the caller) | drain: `notify-debounce` |
+| [notify.yml](../.github/workflows/notify.yml) | Notify | `issues`/`pull_request` (debounced batch), `workflow_call` (immediate, when a needed job of the caller ended in `failure`) | drain: `notify-debounce` |
 | [trace-verify.yml](../.github/workflows/trace-verify.yml) | Trace Verify | `push` touching `scripts/build.sh`, `scripts/utils.sh`, `scripts/apkmirror_search.py` or `.github/traces/**` | `trace-verify` |
 
 Nothing here runs on `push` to `main` except Trace Verify: a push changes
@@ -88,6 +88,15 @@ forge answers again. The deliberate fail-open inside that check is recorded in
   `build` concurrency group therefore serialises every manifest merge against the
   `website` branch — two builders never merge at once.
 - `trigger_cleanup` runs on `always()` if either build succeeded.
+- `trigger_notify_failure` runs on `always() && contains(needs.*.result, 'failure')`.
+  The `always()` is load-bearing, not stylistic: GitHub skips a job whose needed job
+  was **skipped** unless the condition begins with `always()`, and a `check_patch`
+  failure leaves both build jobs skipped. Under a bare `failure()` that meant the one
+  failure which gates every build was the one that announced nothing (run
+  39261459573, killed by a typo'd config key in "Compile Base Configs"). Matching on
+  `failure` rather than on `!= 'success'` keeps the ordinary quiet night silent: with
+  nothing to build, `build_beta` ends `skipped`, which is not a failure — and a
+  `cancelled` run is not news either.
 - `ci_trigger_flags.sh` writes outputs with explicit `if` blocks rather than
   `[ … ] || [ … ] && var=` lists on purpose: under `set -e` a short-circuit list
   whose final command never runs exits non-zero and would kill the step *before*
