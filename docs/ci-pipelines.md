@@ -9,7 +9,7 @@ GitHub's limits; notify reports failures.
 | [ci.yml](../.github/workflows/ci.yml) | CI | `schedule` (6 UTC crons: ~4 h windows with randomized minutes), `workflow_dispatch` | `ci` |
 | [build.yml](../.github/workflows/build.yml) | Build | `workflow_call` only — from `ci.yml` (per pool) or `manual-ci.yml` | `build` |
 | [cleanup.yml](../.github/workflows/cleanup.yml) | Cleanup | `workflow_call`, `workflow_dispatch` | `clean` |
-| [manual-ci.yml](../.github/workflows/manual-ci.yml) | Manual CI | `workflow_dispatch` (config choice + optional `remove_apks`) | `ci` |
+| [manual-ci.yml](../.github/workflows/manual-ci.yml) | Manual CI | `workflow_dispatch` (config choice, optional `remove_apks`, `disable_dedup` checkbox) | `ci` |
 | [notify.yml](../.github/workflows/notify.yml) | Notify | `issues`/`pull_request` (debounced batch), `workflow_call` (immediate, when a needed job of the caller ended in `failure`) | drain: `notify-debounce` |
 | [trace-verify.yml](../.github/workflows/trace-verify.yml) | Trace Verify | `push` touching `scripts/build.sh`, `scripts/utils.sh`, `scripts/apkmirror_search.py` or `.github/traces/**` | `trace-verify` |
 
@@ -114,8 +114,9 @@ forge answers again. The deliberate fail-open inside that check is recorded in
 
 ## The build job (`build.yml`)
 
-Called once per pool with `config_file` (and optional `remove_apks`). Everything
-it needs to be reproducible lives in that one file, including the tuning knobs —
+Called once per pool with `config_file` (and optional `remove_apks`, plus
+`disable_dedup` from Manual CI). Everything it needs to be reproducible lives in
+that one file, including the tuning knobs —
 `PARALLEL_JOBS: "6"` and `UPLOAD_CONCURRENCY: "12"` are workflow env values, not
 repo variables, so they are visible in PRs, survive forks, and carry git history
 (why: [decisions/0005](decisions/0005-tuning-knobs-live-in-the-workflow.md)).
@@ -155,7 +156,10 @@ Step order, with the reason each is where it is:
    step consumes. An app whose freshly patched APK matches its published
    fingerprint (`state/build_content_hashes.json`, `RVB_DEDUP_MODE=enforce`) is
    skipped before module packaging and recorded under `temp/unchanged/` — a
-   skip, not a failure; it never reaches the failure report. The match only
+   skip, not a failure; it never reaches the failure report. The job env derives
+   that knob from `inputs.disable_dedup`: ticked, a Manual CI run demotes to
+   `log`, so a match is still reported but nothing is withheld and the app
+   publishes anyway; every other caller gets `enforce`. The match only
    suppresses when every artifact kind the build was asked to publish is already
    live on the record, and a bare-md5 entry (kinds unknown) never suppresses at
    all — see [build-engine.md](build-engine.md).

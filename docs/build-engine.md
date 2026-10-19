@@ -115,13 +115,15 @@ an identical APK under a new build number falsely notifies every updater
   redundancy, never toward a silent drop.
 - **`RVB_DEDUP_MODE`** (`off|log|enforce`). Tuning knob by
   [decisions/0005](decisions/0005-tuning-knobs-live-in-the-workflow.md): named
-  **only** by the `build.yml` job env (which runs `enforce` since the 1388-1391
-  log phase found one true duplicate, zero false matches and no stale state) —
-  there is deliberately no config key for it. Unset, as in any local run, it
-  defaults to `log`: measure, never skip. The value is read into the exported
-  variable itself and printed at build start; assigning it after a config-style
-  read is how the workflow's choice got clobbered once. `log` computes and
-  compares but skips nothing and mutates no reference.
+  **only** by the `build.yml` job env — never by a config key — and that env is
+  `enforce` since the 1388-1391 log phase found one true duplicate, zero false
+  matches and no stale state, except on a Manual CI run whose `disable_dedup`
+  checkbox demotes it to `log` — the match is reported, the artifact is not
+  withheld. Unset, as in any local run, it defaults to `log`: measure, never
+  skip. The value is read into the exported variable itself and printed at build
+  start; assigning it after a config-style read is how the workflow's choice got
+  clobbered once. `log` computes and compares but skips nothing and mutates no
+  reference.
 - Records: `temp/unchanged/<slug>.json` per skipped app (same survive-the-sweep
   rule as `temp/failures/`), and `temp/hashes/append.<pid>.tsv` lines per fresh
   fingerprint — consumed by `build_check_no_change.sh` and

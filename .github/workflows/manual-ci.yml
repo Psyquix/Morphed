@@ -17,6 +17,11 @@ on:
         required: false
         type: string
         default: ""
+      disable_dedup:
+        description: "Don't suppress duplicate builds: run dedup in log mode (report matches, still publish everything)"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ci
@@ -28,6 +33,7 @@ jobs:
     with:
       config_file: ${{ inputs.config_file }}
       remove_apks: ${{ inputs.remove_apks }}
+      disable_dedup: ${{ inputs.disable_dedup }}
     secrets: inherit
 
   trigger_cleanup:
