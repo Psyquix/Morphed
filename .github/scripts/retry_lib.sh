@@ -80,9 +80,9 @@ retry_effective_arch() {
 # compile_patch_configs.py, so a new TOML key cannot silently join the class of "edits
 # a maintainer thinks cost a build but that cost nothing".
 #
-# Membership is not a judgement call: every key below is one a script actually reads
-# (`toml_get "$t"` / `toml_get "$main_config_t"` in scripts/build.sh, or named in
-# ci_check_app_patches.py / scripts/utils.sh). Upstream ReVanced Manager has keys this
+# Membership is not a judgement call: every key below is one the ENGINE reads
+# (`toml_get "$t"` / `toml_get "$main_config_t"` in scripts/build.sh), because only a
+# key the engine reads can change an artifact. Upstream ReVanced Manager has keys this
 # builder does not — `mount-*`, `compress-module-files`, `override-version-code`,
 # `use-prebuilt-apks` — and none of them belongs here: a tracked key that no code reads
 # would claim credit for changes that cannot happen.
@@ -96,12 +96,17 @@ retry_effective_arch() {
 #   * `author`, `author-page` — read from a config's file-level defaults only
 #     (build.sh takes them from `main_config_t`, never from an app block), so an edit
 #     inside an app entry changes nothing.
+#   * `patch-folder` — read by ci_check_app_patches.py and by nothing in the engine, so
+#     it cannot change one byte of an artifact: a rebuild over it is always suppressed by
+#     the content hash and buys nothing but a wasted run. What it does change is which
+#     bundle files are attributed to which app, and that correction lands correctly when
+#     the source next releases — the scan re-hashes the bucket and compares it then.
 # A key no code reads at all (the historical `folder-name`) is not listed here: the
 # compiler rejects it outright, which is the only thing that could have made the typo
 # visible in the first place.
 retry_tracked_keys() {
 	printf '%s\n' \
-		patches-source patches-source-host patches-version patch-folder \
+		patches-source patches-source-host patches-version \
 		cli-source cli-source-host cli-version \
 		brand variant sub-variant app-name pkg-name patched-pkg-name \
 		included-patches excluded-patches exclusive-patches inclusive-patches \
@@ -116,7 +121,7 @@ retry_tracked_keys() {
 # than forgotten; `*-dlurl` is matched by suffix, not by name, so a new store cannot
 # slip in as an unclassified key.
 retry_ignored_keys() {
-	printf '%s\n' enabled author author-page
+	printf '%s\n' enabled author author-page patch-folder
 }
 
 # retry_tracked_key <name> / retry_ignored_key <name> — is this key classified?
@@ -178,7 +183,8 @@ retry_shape_kinds() {
 	retry_kinds_of "$bm"
 }
 
-# retry_effective_cfg <config-file> <app-key> — the tracked fields of one app's
+# retry_effective_cfg <config-file> <app-key> [precomputed-keys-json] — the tracked
+# fields of one app's
 # compiled entry, as a compact JSON object with a fixed key order and every value
 # stringified. Tracked keys the app leaves at their recorded value are dropped, so
 # the map carries only what the maintainer actually wrote: keeping all of them would
@@ -192,9 +198,11 @@ retry_shape_kinds() {
 # entry (ADR 0010's re-arm signal) — narrower here on purpose, because transport
 # and membership fields must not wake a finished app.
 retry_effective_cfg() {
-	local cfg=${1:-} key=${2:-} keys
+	local cfg=${1:-} key=${2:-} keys=${3:-}
 	[ -n "$cfg" ] && [ -f "$cfg" ] || { printf '{}'; return 0; }
-	keys=$(retry_tracked_keys | jqx -R . | jqx -sc .)
+	if [ -z "$keys" ]; then
+		keys=$(retry_tracked_keys | jqx -R . | jqx -sc .)
+	fi
 	jqx -c --arg k "$key" --argjson keys "$keys" --argjson defaults "$(retry_cfg_defaults)" '
 		(.[$k] // {}) as $e
 		| reduce $keys[] as $f ({};

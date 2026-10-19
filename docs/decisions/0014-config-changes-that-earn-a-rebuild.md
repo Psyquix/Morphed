@@ -58,14 +58,23 @@ produced from** — not just its arches:
 
 `cfg` holds only the **tracked** keys — the ones whose value changes what an
 artifact is built from, or whether it is built at all. The list lives once in
-`retry_tracked_keys()`; nothing else re-implements it.
+`retry_tracked_keys()`; nothing else re-implements it, and membership answers to one
+test: does the **engine** read this key. `patch-folder` is the case that shows the test
+biting — a watcher script reads it, so it is a genuine key the compiler must accept, but
+the engine never does, so no artifact can differ and a rebuild over it is always
+suppressed. A baseline is a record of the tracked config and nothing else, so when a key
+leaves the list the key is removed from the stored baselines by the state cleanup, and
+the comparison stays what it always was: a plain diff of two maps. Teaching the
+comparison to tolerate stale keys would let the state file accumulate fields that no
+longer mean anything.
 
 ### What earns a rebuild
 
 | edit | rebuild? | why |
 |---|---|---|
 | patch source publishes a release; app version moves | ✅ as before | untouched by this record |
-| `patches-source`, `patches-version` (pin), `cli-source`, `patch-folder`, `included`/`excluded`/`exclusive`/`inclusive-patches`, `patcher-args`, `brand`/`variant`/`sub-variant`, `app-name`, `pkg-name`, `arch`, `build-mode`, `version`, `version-code`, `dpi`, `include-stock`, `compression-level`, `module-prop-name`, `enable-module-update` | ✅ new | the tracked map differs |
+| `patches-source`, `patches-version` (pin), `cli-source`, `included`/`excluded`/`exclusive`/`inclusive-patches`, `patcher-args`, `brand`/`variant`/`sub-variant`, `app-name`, `pkg-name`, `arch`, `build-mode`, `version`, `version-code`, `dpi`, `include-stock`, `compression-level`, `module-prop-name`, `enable-module-update` | ✅ new | the tracked map differs |
+| `patch-folder` | ❌ | read by `ci_check_app_patches.py` to attribute bundle folders to an app, and by nothing in the engine — so a rebuild reproduces identical bytes and the content hash withholds them. The corrected attribution lands with the source's next release, when the bundle is hashed again. |
 | `both → apk` (a narrowing of `build-mode` or `arch`) | ❌ | no rebuild can un-publish; see below |
 | any `*-dlurl` | ❌ | transport: the same version/versionCode/arch artifact arrives from another store. If a store ever serves different bytes, the build's own content fingerprint says so on the next real build |
 | `enabled = false → true` | ❌ unless a tracked field also moved | see [0010](0010-config-change-pending-builds.md)'s prune: the queue entry is retired, the memory is kept, so a pure toggle describes an order that is already satisfied |
@@ -165,10 +174,13 @@ the build succeeded would re-announce one edit and the topic would stop meaning
   throws its own rewrite away silently. The harness caught exactly this before
   landing.
 - A tracked key added to a config is only noticed by the diff if
-  `retry_tracked_keys()` lists it. Trace case 19 closes that loop by requiring every
-  key CONFIG.md documents to be either tracked or explicitly ignored, so a new key
-  fails a test rather than silently landing in the "edits that look like they should
-  rebuild but do not" class — which is the class this record is about.
+  `retry_tracked_keys()` lists it, and a key removed from it stops being noticed — both
+  directions are deliberate, so the list is the whole policy. Trace case 19 closes the
+  first loop by requiring every key CONFIG.md documents to be either tracked or
+  explicitly ignored, so a new key fails a test rather than silently landing in the
+  "edits that look like they should rebuild but do not" class — which is the class this
+  record is about. Cases 23–24 close the second: an untracked key cannot wake anything,
+  and a leftover key in a baseline never hides a real change beside it.
 - Known limits, deliberately left open: a narrowing does not republish anything;
   a tracked-field change that reproduces byte-identical artifacts is suppressed by
   the content fingerprint and the baseline advances — the release already holds what

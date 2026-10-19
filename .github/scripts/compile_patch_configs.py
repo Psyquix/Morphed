@@ -53,7 +53,7 @@ except ImportError:
 # mirrors it so the shell stays stdlib-only and the compiler needs no subprocess, and
 # `.github/traces/test_config_rearm.sh` fails if the two ever disagree.
 TRACKED_KEYS = frozenset({
-    "patches-source", "patches-source-host", "patches-version", "patch-folder",
+    "patches-source", "patches-source-host", "patches-version",
     "cli-source", "cli-source-host", "cli-version",
     "brand", "variant", "sub-variant", "app-name", "pkg-name", "patched-pkg-name",
     "included-patches", "excluded-patches", "exclusive-patches", "inclusive-patches",
@@ -62,8 +62,12 @@ TRACKED_KEYS = frozenset({
     "github-release-regex", "github-regex", "module-prop-name",
     "enable-module-update",
 })
-# Read by the builder, but never a reason to rebuild (see retry_ignored_keys).
-UNTRACKED_KEYS = frozenset({"enabled", "author", "author-page"})
+# Read by the builder or the watcher, but never a reason to rebuild (see
+# retry_ignored_keys). `patch-folder` is the interesting one: ci_check_app_patches.py
+# uses it to attribute bundle files to an app, the engine never reads it, so a rebuild
+# over a change there reproduces identical bytes and the content hash suppresses them.
+UNTRACKED_KEYS = frozenset(
+    {"enabled", "author", "author-page", "patch-folder"})
 
 
 def unknown_key(key):

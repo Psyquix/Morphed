@@ -348,6 +348,29 @@ run_case arch_widening "$STABLE_CFG" '{"stable":{},"beta":{}}' "$SEED_ARM64"
 	'[{"field":"arch","from":"arm64-v8a","to":"arm-v7a, arm64-v8a"}]' ]] ||
 	fail "case22 no expanded arch delta: $OUT_CHANGED"
 
+# --- 23. patch-folder is attribution metadata, not an artifact input -----------
+# ci_check_app_patches.py reads it; the engine never does, so a rebuild over it
+# reproduces identical bytes and the content hash suppresses them. Waking on it buys a
+# run and nothing else, so it must not be a tracked key.
+CFG_PF=$(printf '%s\n' "$STABLE_CFG" | jqx -c '.["App-x"]["patch-folder"] = "appx"')
+run_case patch_folder_silent "$CFG_PF" '{"stable":{},"beta":{}}' "$SEED_X"
+[[ "$OUT_PENDING" == "[]" ]] || fail "case23 rebuilt for an attribution-only edit: $OUT_PENDING"
+[[ "$OUT_TRIGGER" == "0" ]] || fail "case23 a no-op edit moved state: $OUT_TRIGGER"
+[[ "$(jqx -c . <<<"$OUT_CHANGED")" == '{"stable":{},"beta":{}}' ]] ||
+	fail "case23 announced an attribution-only edit: $OUT_CHANGED"
+
+# --- 24. a change beside a stale baseline key is still seen -------------------
+# Baselines are kept free of untracked keys by the one-shot state cleanup, not by the
+# comparison. This case pins the part that must keep working regardless: an app whose
+# baseline carries leftover text still wakes on a real change.
+STALE_BASELINE=$(printf '%s\n' "$BASE_MAP" | jqx -c '. + {"patch-folder": "leftover"}')
+run_case change_beside_stale_key \
+	"$CFG_BOTH" '{"stable":{},"beta":{}}' \
+	"{\"stable\":{\"App-x\":{\"arches\":[\"arm-v7a\",\"arm64-v8a\"],\"cfg\":$STALE_BASELINE}},\"beta\":{}}"
+[[ "$OUT_PENDING" == '["App-x"]' ]] || fail "case24 missed a real change: $OUT_PENDING"
+[[ "$(jqx -r '.stable["App-x"] | map(.field) | index("build-mode") != null' <<<"$(jqx -c . <<<"$OUT_CHANGED")")" == "true" ]] ||
+	fail "case24 the real change is not what was announced: $OUT_CHANGED"
+
 # --- 21. the shell list and the compiler's mirror agree -----------------------
 # compile_patch_configs.py copies these lists so the shell stays stdlib and it can
 # reject an unknown key without spawning anything. A copy without a check is how two

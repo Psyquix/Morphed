@@ -64,6 +64,9 @@ newjson='{"stable":[],"beta":[]}'
 # diff that proves it: {channel: {app: [{field, from, to}]}}. Written to
 # changed_apps.json; the announcement reads it, so it carries no rendering rules.
 changedjson='{"stable":{},"beta":{}}'
+# The tracked key set, resolved once per run and handed to retry_effective_cfg so the
+# per-app map does not re-derive it (two jq spawns saved for every one of 225 apps).
+tracked_json=$(retry_tracked_keys | jqx -R . | jqx -sc .)
 
 # to_arr <space-separated tokens> -> sorted, unique JSON array. LC_ALL=C keeps the
 # order byte-stable ("arm-v7a" before "arm64-v8a") regardless of the runner locale.
@@ -117,7 +120,7 @@ process_channel() { # $1=channel $2=config-file
 			[ -z "$key" ] && continue
 			want=$(retry_effective_arch "$cfg" "$key")
 			want_arr=$(to_arr "$want")
-			wmap=$(retry_effective_cfg "$cfg" "$key")
+			wmap=$(retry_effective_cfg "$cfg" "$key" "$tracked_json")
 			seed=$(jqx -c --arg k "$key" --argjson a "$want_arr" --argjson m "$wmap" \
 				'.[$k] = {arches: $a, cfg: $m}' <<<"$seed")
 		done <<<"$apps"
@@ -136,7 +139,7 @@ process_channel() { # $1=channel $2=config-file
 		# empty diff: it is NO EVIDENCE, and guessing from the current config would
 		# forgive every edit published before the seed landed.
 		have_cfg=$(retry_shape_cfg "$ch" "$key" "$bs")
-		want_cfg=$(retry_effective_cfg "$cfg" "$key")
+		want_cfg=$(retry_effective_cfg "$cfg" "$key" "$tracked_json")
 		cdiff='[]'
 		cdiff_other='[]'
 		moved=0

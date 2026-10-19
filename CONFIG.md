@@ -150,7 +150,7 @@ last built from is recorded per app in `state/built_shape.json` (why:
 [docs/decisions/0014](docs/decisions/0014-config-changes-that-earn-a-rebuild.md)).
 
 - **Editing these rebuilds the app:** `patches-source`, `patches-source-host`,
-  `patches-version`, `patch-folder`, `cli-source`, `cli-source-host`, `cli-version`,
+  `patches-version`, `cli-source`, `cli-source-host`, `cli-version`,
   `brand`, `variant`, `sub-variant`, `app-name`, `pkg-name`, `patched-pkg-name`,
   `included-patches`, `excluded-patches`, `exclusive-patches`, `inclusive-patches`,
   `patcher-args`, `arch`, `build-mode`, `version`, `version-code`, `dpi`,
@@ -158,7 +158,11 @@ last built from is recorded per app in `state/built_shape.json` (why:
   `github-release-regex`, `github-regex`, `module-prop-name`, `enable-module-update`.
 - **Editing these does not:** any `*-dlurl` — they choose *where* the same artifact is
   fetched from, and if a store ever serves different bytes the build's own content
-  fingerprint says so on the next real build; `enabled` — turning an app off retires
+  fingerprint says so on the next real build; `patch-folder` — the CI uses it to
+  attribute patch-bundle folders to an app and the engine never reads it, so a rebuild
+  over it reproduces identical bytes and the duplicate-build hash withholds them; the
+  corrected attribution lands with the source's next release, when the bundle is hashed
+  again; `enabled` — turning an app off retires
   its queued retry, turning it back on rebuilds nothing unless a field above also
   moved; `author` and `author-page` — read from a file's top-level defaults only, never
   from an app block.
