@@ -244,8 +244,18 @@ for adding surface without a measured gain
    `-all` key and reused by both arch jobs from that single fetch.
 5. **Arch trimming** — bundles go through `_trim_bundle_for_arch` (config members
    filtered by ABI); plain APKs get foreign `lib/<abi>/*` entries removed with
-   `zip -d`. Result is cached as `<prefix>-<version>-<arch>.stripped.<ext>`, and
-   `all`/`universal` ships the raw bundle.
+   `zip -d`. Result is cached as `<prefix>-<version>-<arch>.stripped.<ext>`. A morphe
+   build then states that same keep decision to the CLI as `--striplibs <keep-list>`
+   (`_striplibs_keep_of_arch`), which filters at output assembly rather than on the
+   input: a no-op wherever the trim or `zip -d` already removed the foreign entries,
+   and otherwise the only thing that reaches a bundle's `base.apk` libs, legacy
+   `armeabi`/`mips`, or a `lib/<dir>` that is no ABI at all — and unlike `zip -d`,
+   whose failure the engine tolerates, it is enforced by the patcher. `all` means
+   **arm universal**: `arm64-v8a` and `armeabi-v7a`, no x86 ABI, whichever artifact
+   format the vendor shipped (an `all` bundle is otherwise copied whole, so the flag
+   is what makes the two paths agree). Publishing x86/x86_64 would be its own
+   decision, not a side effect of the download source. `RVB_MORPHE_STRIPLIBS=false`
+   drops the flag and patches from exactly the inputs it did before.
 6. **Patching** — `patch_apk` dispatches on the tool kind resolved by the patcher
    registry (see below) and records which patches the tool reports as applied.
 7. **Naming and metadata** — `aapt2`/`aapt` re-reads the patched manifest, so a

@@ -334,6 +334,7 @@ the runner's git config.
 | var | `TG_CHAT_ID`, `TG_CHAT_ID_BROADCAST`, `TG_THREAD_CI`, `TG_THREAD_STABLE`, `TG_THREAD_BETA`, `TG_THREAD_NOTIFY`, `TG_THREAD_ANNOUNCE` | notifications | the chat handle and every topic ID come from here only, and an unset one fails its notify step (see the target guard above) instead of falling back to a written-in chat; `TG_THREAD_NOTIFY` receives the per-app build/download failure report, `TG_THREAD_ANNOUNCE` is the announcement topic — config additions and config-change rebuild notices together (that step is `continue-on-error`, so an unset one only skips the notice). It replaced `TG_THREAD_NEWAPPS`, which pointed at the same topic under the narrower name |
 | var | `RELEASE_NOTES_TG_LINK`, `RELEASE_NOTES_DONATE_LINK`, `RELEASE_NOTES_WEBSITE_LINK` | build | footer links in the generated release body; the Group link is omitted when its var is unset, never invented |
 | var | `RVB_MORPHE_PASSTHROUGH` | build | bundle handling escape hatch |
+| var | `RVB_MORPHE_STRIPLIBS` | build | bisect switch for morphe's own `--striplibs`, passed on top of the engine's trim/`zip -d`; `false` patches with the engine strip alone ([build-engine.md](build-engine.md)) |
 
 ## Log conventions
 

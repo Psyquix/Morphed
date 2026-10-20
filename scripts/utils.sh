@@ -86,6 +86,15 @@ RVB_INSTAFEL_DEFAULT_PATCHES="${RVB_INSTAFEL_DEFAULT_PATCHES:-unlock_developer_o
 # RVB_MORPHE_PASSTHROUGH=false to revert to the old merge-at-download flow.
 RVB_MORPHE_PASSTHROUGH="${RVB_MORPHE_PASSTHROUGH:-true}"
 
+# Morphe's own native-lib strip, passed in addition to the engine's trim/zip -d and
+# not instead of it: where the engine already removed the foreign ABIs it is a no-op,
+# and it reaches what a deny-list of ABI names cannot - legacy armeabi/mips, a
+# lib/<dir> that is no ABI at all, the multi-ABI libs a bundle's base.apk can carry.
+# It is also enforced by the patcher, so a swallowed `zip -d` failure no longer
+# publishes a fat APK. Set RVB_MORPHE_STRIPLIBS=false to drop the flag and patch
+# exactly as before - the bisect switch, same shape as the passthrough knob above.
+RVB_MORPHE_STRIPLIBS="${RVB_MORPHE_STRIPLIBS:-true}"
+
 declare -gA __PREBUILTS_CACHE__
 declare -g __PREBUILTS_RESULT=""
 declare -gA __PATCHES_LIST_CACHE__
@@ -1366,6 +1375,22 @@ _abi_token_of_arch() { # $1=build arch
 		x86_64) echo "X86_64" ;;
 		x86) echo "X86" ;;
 		*) echo "" ;;
+	esac
+}
+
+# The same arch pairing, spelled for the Morphe CLI's --striplibs keep-list, which
+# reads the Android ABI name ("armeabi-v7a") rather than the versionCode token above.
+# A concrete arch keeps its own ABI. The catch-all arches mean "arm universal", which
+# is what the engine has always published there (the zip -d default), so an all build
+# carries no x86 ABI whichever artifact format the vendor happened to ship - real x86
+# support is a separate decision, not an accident of the download source.
+_striplibs_keep_of_arch() { # $1=build arch
+	case "${1,,}" in
+		arm64-v8a | arm64) echo "arm64-v8a" ;;
+		arm-v7a | armeabi-v7a | arm) echo "armeabi-v7a" ;;
+		x86_64) echo "x86_64" ;;
+		x86) echo "x86" ;;
+		*) echo "arm64-v8a,armeabi-v7a" ;;
 	esac
 }
 
@@ -5833,6 +5858,15 @@ build_rv() {
 				zip -d "$stock_apk_to_patch" "lib/x86_64/*" "lib/x86/*" >/dev/null 2>&1 || :
 			fi
 		fi
+		fi
+
+		# Morphe's own strip, stating the keep decision the branch above just made, on
+		# both input kinds: a no-op when the trim or zip -d already removed those
+		# entries, and otherwise the only thing that reaches a bundle's base.apk libs,
+		# legacy armeabi/mips, or a lib/<dir> that is no ABI at all. It is also enforced
+		# by the patcher, where a `zip -d` failure is one the engine swallows.
+		if [ "${PATCHER_KIND:-}" = morphe ] && [ "$RVB_MORPHE_STRIPLIBS" = true ]; then
+			patcher_args+=("--striplibs" "$(_striplibs_keep_of_arch "$arch_f")")
 		fi
 
 		local per_bundle_ed_joined=""

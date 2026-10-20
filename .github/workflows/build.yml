@@ -157,6 +157,7 @@ jobs:
           NEXT_VER_CODE: ${{ steps.version.outputs.NEXT_VER_CODE }}
           CF_SOLVER_URL: "http://localhost:8000"
           RVB_MORPHE_PASSTHROUGH: "${{ vars.RVB_MORPHE_PASSTHROUGH || 'true' }}"
+          RVB_MORPHE_STRIPLIBS: "${{ vars.RVB_MORPHE_STRIPLIBS || 'true' }}"
           RVB_DEDUP_MODE: ${{ env.RVB_DEDUP_MODE }}
           RELEASE_NOTES_TG_LINK: ${{ vars.RELEASE_NOTES_TG_LINK }}
           RELEASE_NOTES_DONATE_LINK: "${{ vars.RELEASE_NOTES_DONATE_LINK || 'https://fahim-ahmed05.github.io/donate' }}"
