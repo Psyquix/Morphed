@@ -10,16 +10,21 @@
 #
 # Records (written by scripts/utils.sh + scripts/build.sh), one per app+arch:
 #   <slug>.json    a build that aborted (has <slug>.log alongside)
+#   <slug>_pf.json a build the patcher itself aborted, "Patching aborted" — the
+#                  engine skips with rc 0 for it, so only this survivor pair (plus
+#                  <slug>_pf.log, relocated by the parent) reaches this directory
 #   <slug>_dl.json a build whose download sources were all exhausted
 #   <slug>_np.json a build the patch set refused for every supported version, so no
 #                  APK was ever fetched (the dl record must not cover it: asking for a
 #                  manual upload of a file nobody wanted is noise)
 # Records are regrouped by app base name and rendered in three parts: a Build
-# Failed section (per-arch versionCode + the log link), a Download Failures section
+# Failed section (per-arch versionCode + the log link; both the <slug>.json and
+# the <slug>_pf.json survivors land here), a Download Failures section
 # (per-arch versionCode + search-engine links for the APK) and a Patch Compatibility
 # section (the versions the bundle refused + the bundle link to complain to). Each arch
 # carries its own version so an app that resolved a different version per arch
-# never renders a wrong shared version.
+# never renders a wrong shared version. A _pf twin whose plain <slug>.json also
+# survived is dropped: that build aborted hard and is already reported with its log.
 #
 # Route B: when this step actually sends, it writes reported_failures=true so
 # ci.yml can skip the generic "🔴 CI #N failed" alert for the same run.
@@ -84,12 +89,17 @@ declare -A BREC DREC BORDERSET DORDERSET VCFB
 BORDER=""; DORDER=""
 shopt -s nullglob
 for json in "$FAILURES_DIR"/*.json; do
-	case "$json" in *_dl.json | *_np.json) continue ;; esac
+	case "$json" in *_dl.json | *_np.json | *_pf.json) continue ;; esac
 	slug="$(basename "${json%.json}")"
 	# A cascaded case (download exhausted, or the patch set refused, then the build
 	# itself failed) is reported once, as the build failure; drop its twins.
 	[ -f "$FAILURES_DIR/${slug}_dl.json" ] && rm -f "$FAILURES_DIR/${slug}_dl.json"
 	[ -f "$FAILURES_DIR/${slug}_np.json" ] && rm -f "$FAILURES_DIR/${slug}_np.json"
+	# A hard abort already carries the patcher's own failure in <slug>.log: the
+	# _pf survivor would render the same app+arch a second time. Remove the pair.
+	if [ -f "$FAILURES_DIR/${slug}_pf.json" ]; then
+		rm -f "$FAILURES_DIR/${slug}_pf.json" "$FAILURES_DIR/${slug}_pf.log"
+	fi
 
 	app="$(jq -r '.app // empty' "$json")"
 	arch="$(jq -r '.arch // empty' "$json")"
@@ -110,6 +120,37 @@ for json in "$FAILURES_DIR"/*.json; do
 	[ "$(jq -r '.vc_fallback // false' "$json")" = "true" ] && VCFB[$base]=1
 	BREC[$base]+="${arch}|${ver}|${vc}|${logurl}|${patches}|${NL}"
 	[ -z "${BORDERSET[$base]:-}" ] && { BORDER+="${base}${NL}"; BORDERSET[$base]=1; }
+done
+
+# Patcher aborts (the patch set loaded, the APK was fetched, the patcher refused to
+# produce one): survivors of the parent's clean-return sweep, because build_rv
+# skips with rc 0 on a patch_apk failure. Same fields and same Build Failed
+# section as a plain build record; the log is the <slug>_pf.log the parent
+# relocated from the child's captured output. A slug with BOTH a plain record and
+# a _pf twin was consumed by the build loop above, which deletes the twin.
+for json in "$FAILURES_DIR"/*_pf.json; do
+	slug="$(basename "${json%.json}")"          # "<slug>_pf"
+	base_log="${slug%_pf}"                      # "<slug>"
+	app="$(jq -r '.app // empty' "$json")"
+	arch="$(jq -r '.arch // empty' "$json")"
+	ver="$(version_label "$(jq -r '.version // empty' "$json")")"
+	vc="$(jq -r '.vc // empty' "$json")"
+	patches="$(jq -r '.patches_src // empty' "$json")"
+	logurl=""
+	# The parent relocates the captured log to <slug>_pf.log on the rc-0 sweep;
+	# a leftover <slug>.log (its plain descriptor gone, so not a hard abort) is
+	# the serial-mode alternative.
+	for _pfl in "$FAILURES_DIR/${slug}.log" "$FAILURES_DIR/${base_log}.log"; do
+		if [ -f "$_pfl" ]; then
+			link="$(curl -sS --data-binary "@$_pfl" "$XIPE_URL_BASE/" 2> /dev/null || true)"
+			case "$link" in "$XIPE_URL_BASE/"*) logurl="$link" ;; esac
+			break
+		fi
+	done
+	base="$(app_base "$app" "$arch")"
+	if [ "$(jq -r '.vc_fallback // false' "$json")" = "true" ]; then VCFB[$base]=1; fi
+	BREC[$base]+="${arch}|${ver}|${vc}|${logurl}|${patches}|${NL}"
+	if [ -z "${BORDERSET[$base]:-}" ]; then BORDER+="${base}${NL}"; BORDERSET[$base]=1; fi
 done
 
 for json in "$FAILURES_DIR"/*_dl.json; do

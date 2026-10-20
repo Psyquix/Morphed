@@ -225,7 +225,10 @@ abort() {
 # the CI step consumes them. Kept notification-free on purpose (no Telegram/curl
 # here) so the engine stays pure. A build failure leaves <slug>.json (descriptor)
 # plus <slug>.log (attached by build.sh's parent); a download-exhaustion leaves
-# only <slug>_dl.json; a patch-set rejection leaves only <slug>_np.json. All
+# only <slug>_dl.json; a patch-set rejection leaves only <slug>_np.json; a
+# patcher abort (which skips with rc 0, so the plain descriptor is wiped as a
+# "clean" return) leaves the survivor pair <slug>_pf.json plus <slug>_pf.log —
+# the parent copies the build log onto that name before the sweep. All
 # fail-soft: a write error never aborts a build.
 #
 # The slug is derived from the display label "$table" (which already carries the
@@ -280,6 +283,34 @@ write_no_patches_failure_descriptor() {
 		--arg patch_url "$9" \
 		'{type:$type, app:$app, tried:$tried, version:$version, vc:$vc, arch:$arch, patches_src:$patches_src, pkg:$pkg, patch_url:$patch_url}' \
 		> "$dir/$1_np.json" 2> /dev/null || true
+}
+
+# write_patch_failure_record — record that the patcher itself aborted this build
+# (patch_apk returned non-zero, "Patching aborted"). build_rv still returns 0 for
+# it — the per-app fail-soft skip — so the plain <slug>.json descriptor is deleted
+# by the parent's clean-return sweep and the serial tee log with it. The _pf suffix
+# survives that sweep the way _dl/_np do, and the parent copies the captured build
+# log to <slug>_pf.log so the report can link it: the abort reason lives only in
+# that log. Fields mirror write_build_failure_descriptor so the CI step renders the
+# record in the same Build Failed section.
+# $1=slug $2=app $3=version $4=vc $5=arch $6=patches_src
+write_patch_failure_record() {
+	[ -n "${TEMP_DIR:-}" ] || return 0
+	local dir="$TEMP_DIR/failures"
+	mkdir -p "$dir" 2> /dev/null || return 0
+	jq -n --arg type "patch_failed" --arg app "$2" --arg version "$3" \
+		--arg vc "$4" --arg arch "$5" --arg patches_src "$6" \
+		'{type:$type, app:$app, version:$version, vc:$vc, arch:$arch, patches_src:$patches_src}' \
+		> "$dir/$1_pf.json" 2> /dev/null || true
+}
+
+# clear_patch_failure_record — drop the survivor pair for a build that ultimately
+# produced its artifact. build_rv calls it on a dedup skip (content already
+# published), so a patcher abort earlier in the same build must not re-report or
+# re-queue an app+arch that shipped. Stale records would otherwise loop the app.
+clear_patch_failure_record() { # $1=slug
+	[ -n "${TEMP_DIR:-}" ] || return 0
+	rm -f "$TEMP_DIR/failures/$1_pf.json" "$TEMP_DIR/failures/$1_pf.log" 2> /dev/null || true
 }
 # env -i keeps JVM runs hermetic; XDG_DATA_HOME is forwarded so callers can
 # relocate an app's per-user state dir out of the shared HOME (see the
@@ -5814,6 +5845,15 @@ build_rv() {
 		if [ "${NORB:-}" != true ] || { [ ! -f "$patched_apk" ] && [ ! -f "$apk_output" ]; }; then
 			if ! patch_apk "$stock_apk_to_patch" "$patched_apk" "${patcher_args[*]}" "${args[cli]}" "${args[ptjar]}" "${args[cli_source]}" "$per_bundle_ed_joined"; then
 				epr "Building '${table}' failed!"
+				# rc 0 keeps the per-app fail-soft, but it also made this failure
+				# invisible to the report: the parent reads the clean return as
+				# success and deletes <slug>.json/<slug>.log (run 39199799796:
+				# TikTok-hushfeed aborted on both arches, nothing notified). The
+				# _pf survivor pair is what the CI step and the retry writer read;
+				# the parent moves the captured log onto <slug>_pf.log.
+				write_patch_failure_record "$(failure_slug "$table")" "$table" "$version_f" \
+					"$(parse_arch_mapping "${args[version_code]:-}" "$arch_f")" \
+					"$arch_f" "${args[patches_src]:-${args[cli_source]:-}}"
 				return 0
 			fi
 		fi
@@ -5833,6 +5873,10 @@ build_rv() {
 					"$table" "$app_name" "$version_f" "$arch_f" "${build_mode_arr[*]}"; then
 				# rc 0 is the skip itself: nothing copied to BUILD_DIR, no
 				# write_build_info fragment, notes and manifest stay truthful.
+				# The content is published, so a patcher abort earlier in this
+				# same child (e.g. apk mode failed, module mode shipped the
+				# bytes) must not re-queue or re-report this app+arch.
+				clear_patch_failure_record "$(failure_slug "$table")"
 				return 0
 			fi
 		fi

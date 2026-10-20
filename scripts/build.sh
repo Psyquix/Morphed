@@ -104,9 +104,26 @@ _attach_failure_log() { # $1=label $2=log-file
 	cp "$2" "$FAILURES_DIR/$slug.log" 2>/dev/null || true
 }
 # Drop any stale failure record for a build that ultimately returned clean.
-# Also removes the serial-mode tee log (same <slug>.log basename).
-_clear_failure_record() { # $1=label
-	local slug; slug=$(failure_slug "$1")
+# Also removes the serial-mode tee log (same <slug>.log basename). A patcher
+# abort ALSO returns clean (build_rv's fail-soft skip) but leaves a <slug>_pf.json
+# survivor alongside the <slug>.json descriptor the version-resolution point
+# already wrote; that pair always reflects THIS child (temp/failures is wiped at
+# build.sh START, and a slug is built once per run). When <slug>_pf.json is present,
+# relocate the captured log onto <slug>_pf.log BEFORE the sweep deletes the plain
+# names — the abort reason lives only in that log, and the plain descriptor must
+# still go so the build is reported once, from the _pf record. $1 names the log
+# source: absent uses the serial tee log (<slug>.log, same dir); a path (the pooled
+# child's queue log) is moved when there is no plain tee log.
+_clear_failure_record() { # $1=label [$2=pf-log-source]
+	local slug _src="${2:-}"
+	slug=$(failure_slug "$1")
+	if [ -f "$FAILURES_DIR/${slug}_pf.json" ]; then
+		if [ -f "$FAILURES_DIR/$slug.log" ]; then
+			mv -f "$FAILURES_DIR/$slug.log" "$FAILURES_DIR/${slug}_pf.log" 2>/dev/null || true
+		elif [ -n "$_src" ] && [ -f "$_src" ]; then
+			mv -f "$_src" "$FAILURES_DIR/${slug}_pf.log" 2>/dev/null || true
+		fi
+	fi
 	rm -f "$FAILURES_DIR/$slug.json" "$FAILURES_DIR/$slug.log" 2>/dev/null || true
 }
 
@@ -158,7 +175,10 @@ if ((PAR_JOBS > 1)); then
 			cat "${JOB_LOG[$id]}" 2>/dev/null
 			if [ -n "${GITHUB_REPOSITORY:-}" ]; then echo "::endgroup::"; fi
 			if [ "$rc" = 0 ]; then
-				_clear_failure_record "${JOB_LABEL[$id]}"
+				# second arg: this child's queue log, relocated onto <slug>_pf.log
+				# when the child recorded a patcher abort (the plain descriptor
+				# would otherwise take it to the sweep as a "clean" return).
+				_clear_failure_record "${JOB_LABEL[$id]}" "${JOB_LOG[$id]}"
 			else
 				epr "Build failed for ${JOB_LABEL[$id]} (exit $rc)"
 				_attach_failure_log "${JOB_LABEL[$id]}" "${JOB_LOG[$id]}"

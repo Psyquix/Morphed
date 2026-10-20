@@ -38,12 +38,22 @@ to `-`) is identical in the pooled child, the serial parent and the CI step.
   cache-repo upload. Both exhaustion points record: no source that can be read at
   all, and every version tried through every source with nothing accepted — the
   second one used to skip silently, because returning 0 makes the parent delete the
-  app's `<slug>.json` as a clean return, and only the `_dl` name survives that sweep.
+  app's `<slug>.json` as a clean return, and only the `_dl` name survives that sweep
+  (the same trap the `_pf` name below escapes).
 - **Patch-set rejection** — writing `temp/failures/<slug>_np.json` (`tried` lists the
   versions the bundle refused) and returning 0. Kept separate from `_dl` because it
   means the opposite: no source failed and no APK is missing, the patch set has
   nothing to apply for this version set or this arch, so the report names the bundle
   instead of asking for an upload ([decisions/0009](decisions/0009-effective-patch-set-decides-compatibility.md)).
+- **Patcher abort** — the patch set loaded, the APK was fetched, and the patcher
+  itself aborted (`Patching aborted`): `build_rv` also skips with rc 0, which used to
+  wipe the app's `<slug>.json` as a clean return and report nothing (run 39199799796:
+  TikTok-hushfeed failed on both arches, no notification). It now leaves
+  `temp/failures/<slug>_pf.json` (same fields as the build descriptor) and the parent
+  moves the captured log to `<slug>_pf.log` before its sweep; the report renders the
+  pair in the Build Failed section. When the artifact shipped anyway (a dedup skip
+  after an earlier mode aborted in the same build), the child deletes the pair — a
+  published app must not re-queue itself.
 - **Version-code fallback** — a build-failure descriptor also carries
   `vc_fallback: true` when the arch was already fetched through the code→arch fallback
   (stage 4) and still failed. That is a genuine incompatibility, not a transient miss, so

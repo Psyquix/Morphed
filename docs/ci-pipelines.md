@@ -167,13 +167,16 @@ Step order, with the reason each is where it is:
    `continue-on-error`): reads `temp/failures/`, uploads each build log to
    `xi.pe`, and posts ONE batched Markdown message to the failure topic
    (`TG_THREAD_NOTIFY`) in up to three sections — apps that failed to **build**
-   (`<slug>.json`, with the log link and patch source), apps the patch set
+   (`<slug>.json`, with the log link and patch source), apps where **the patcher
+   itself aborted** (`<slug>_pf.json` + `<slug>_pf.log`: the engine skips with rc 0,
+   so the plain descriptor is wiped as a clean return and only this survivor pair
+   reaches the report; rendered in the same Build Failed section), apps the patch set
    **refused for every supported version** (`<slug>_np.json`: the tried versions and
    the bundle link, and deliberately no APK search links, since nothing was ever
    fetched), and apps whose **download sources were all exhausted**
    (`<slug>_dl.json`, a request to upload the APK to the cache repo manually), plus a
-   link to the run. A slug that has a build record has its `_dl`/`_np` twins dropped,
-   so an app is reported once. When it sends, it sets the job output
+   link to the run. A slug that has a build record has its `_dl`/`_np`/`_pf` twins
+   dropped, so an app is reported once. When it sends, it sets the job output
    `reported_failures=true`, which
    `trigger_notify_failure` forwards as `already_reported` so
    `notify_send_telegram.sh` skips the generic "🔴 CI #N failed" alert for that
