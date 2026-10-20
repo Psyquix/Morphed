@@ -242,20 +242,26 @@ for adding surface without a measured gain
    resolves the same link adopts the stored blob (right arch) or skips the source
    (wrong arch) with no network hit. Universal bundles are cached under the shared
    `-all` key and reused by both arch jobs from that single fetch.
-5. **Arch trimming** — bundles go through `_trim_bundle_for_arch` (config members
-   filtered by ABI); plain APKs get foreign `lib/<abi>/*` entries removed with
-   `zip -d`. Result is cached as `<prefix>-<version>-<arch>.stripped.<ext>`. A morphe
-   build then states that same keep decision to the CLI as `--striplibs <keep-list>`
-   (`_striplibs_keep_of_arch`), which filters at output assembly rather than on the
-   input: a no-op wherever the trim or `zip -d` already removed the foreign entries,
-   and otherwise the only thing that reaches a bundle's `base.apk` libs, legacy
-   `armeabi`/`mips`, or a `lib/<dir>` that is no ABI at all — and unlike `zip -d`,
-   whose failure the engine tolerates, it is enforced by the patcher. `all` means
-   **arm universal**: `arm64-v8a` and `armeabi-v7a`, no x86 ABI, whichever artifact
-   format the vendor shipped (an `all` bundle is otherwise copied whole, so the flag
-   is what makes the two paths agree). Publishing x86/x86_64 would be its own
-   decision, not a side effect of the download source. `RVB_MORPHE_STRIPLIBS=false`
-   drops the flag and patches from exactly the inputs it did before.
+5. **Arch trimming** — one keep-list decides both halves (`_striplibs_keep_of_arch`).
+   Bundles go through `_trim_bundle_for_arch`, which drops whole foreign-ABI `config.*`
+   members; a plain APK goes through `_strip_apk_abis`, which reads the archive's own
+   entry list and deletes foreign `lib/<abi>/…` entries by exact name — never by a
+   wildcard, because `lib/x86/*` silently misses a `./`-rooted archive (rc 12, a warning
+   the old `|| :` threw away) while the `*lib/x86/*` that catches it also deletes an app's
+   `assets/engine/lib/x86/…` payload. Only Android's own ABI directory names are
+   candidates, so an app's `lib/<dir>` that names no ABI is left alone. The rewrite lands
+   through a temp file and one rename, and a failure ends that app's build rather than
+   publishing an unstripped artifact. Result is cached as
+   `<prefix>-<version>-<arch>.stripped.<ext>`. A morphe build then states the same
+   decision to the CLI as `--striplibs <keep-list>`, which filters at output assembly
+   rather than on the input: a no-op wherever the engine already removed those entries,
+   and otherwise the only thing that reaches a bundle's `base.apk` libs or a `lib/<dir>`
+   that names no ABI at all. `all` means **arm universal**: `arm64-v8a` and
+   `armeabi-v7a`, no x86 ABI, whichever artifact format the vendor shipped (an `all`
+   bundle is otherwise copied whole, so the flag is what makes the two paths agree).
+   Publishing x86/x86_64 would be its own decision, not a side effect of the download
+   source. `RVB_MORPHE_STRIPLIBS=false` drops the flag and patches from exactly the
+   inputs it did before.
 6. **Patching** — `patch_apk` dispatches on the tool kind resolved by the patcher
    registry (see below) and records which patches the tool reports as applied.
 7. **Naming and metadata** — `aapt2`/`aapt` re-reads the patched manifest, so a

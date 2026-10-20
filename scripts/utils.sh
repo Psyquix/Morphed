@@ -86,13 +86,13 @@ RVB_INSTAFEL_DEFAULT_PATCHES="${RVB_INSTAFEL_DEFAULT_PATCHES:-unlock_developer_o
 # RVB_MORPHE_PASSTHROUGH=false to revert to the old merge-at-download flow.
 RVB_MORPHE_PASSTHROUGH="${RVB_MORPHE_PASSTHROUGH:-true}"
 
-# Morphe's own native-lib strip, passed in addition to the engine's trim/zip -d and
-# not instead of it: where the engine already removed the foreign ABIs it is a no-op,
-# and it reaches what a deny-list of ABI names cannot - legacy armeabi/mips, a
-# lib/<dir> that is no ABI at all, the multi-ABI libs a bundle's base.apk can carry.
-# It is also enforced by the patcher, so a swallowed `zip -d` failure no longer
-# publishes a fat APK. Set RVB_MORPHE_STRIPLIBS=false to drop the flag and patch
-# exactly as before - the bisect switch, same shape as the passthrough knob above.
+# Morphe's own native-lib strip, on top of the engine's trim and _strip_apk_abis rather
+# than instead of them: where the engine already removed the foreign ABIs it is a no-op,
+# and it reaches the two things a rewrite of the input cannot - the multi-ABI libs a
+# bundle's base.apk carries, and any lib/<dir> that names no ABI, which _strip_apk_abis
+# deliberately leaves alone rather than claiming to know. Both sides read the one
+# keep-list, _striplibs_keep_of_arch. Set RVB_MORPHE_STRIPLIBS=false to drop the flag and
+# patch exactly as before - the bisect switch, same shape as the passthrough knob above.
 RVB_MORPHE_STRIPLIBS="${RVB_MORPHE_STRIPLIBS:-true}"
 
 declare -gA __PREBUILTS_CACHE__
@@ -1378,12 +1378,13 @@ _abi_token_of_arch() { # $1=build arch
 	esac
 }
 
-# The same arch pairing, spelled for the Morphe CLI's --striplibs keep-list, which
-# reads the Android ABI name ("armeabi-v7a") rather than the versionCode token above.
-# A concrete arch keeps its own ABI. The catch-all arches mean "arm universal", which
-# is what the engine has always published there (the zip -d default), so an all build
-# carries no x86 ABI whichever artifact format the vendor happened to ship - real x86
-# support is a separate decision, not an accident of the download source.
+# The arch pairing this build's strip is built from, spelled for the Morphe CLI's
+# --striplibs keep-list, which reads the Android ABI name ("armeabi-v7a") rather than the
+# versionCode token above. _strip_apk_abis reads it too, so the input rewrite and the
+# patcher's own strip can never state different decisions. A concrete arch keeps its own
+# ABI. The catch-all arches mean "arm universal": an all build carries no x86 ABI
+# whichever artifact format the vendor shipped, because publishing x86 is a separate
+# decision, not a side effect of the download source.
 _striplibs_keep_of_arch() { # $1=build arch
 	case "${1,,}" in
 		arm64-v8a | arm64) echo "arm64-v8a" ;;
@@ -1762,6 +1763,66 @@ _trim_bundle_for_arch() {
 	if [ ${#drop[@]} -gt 0 ]; then
 		zip -q -d "$dst" "${drop[@]}" 2>/dev/null || return 1
 	fi
+	return 0
+}
+
+# Strip the native-lib ABIs a plain-APK build of this arch must not carry, writing the
+# result to $2. The keep-list is the one this build hands to --striplibs, so the engine's
+# rewrite and the patcher's strip state the same decision.
+#
+# Deletion happens by exact entry name read off the archive, never by a wildcard: zip
+# matches the stored name, so "lib/x86/*" leaves a "./"-rooted "./lib/x86/libso.so"
+# untouched and reports only a warning the old `|| :` threw away, while the widening that
+# does catch it ("*lib/x86/*") also deletes an app's own "assets/engine/lib/x86/…"
+# payload. Both halves were measured, and both are pinned by
+# .github/traces/test_arch_strip.sh. The candidate set is Android's own ABI directories -
+# an app's lib/<dir> that names no ABI is nobody's claim to delete.
+#
+# The archive lands through a temp file and one rename, so a run interrupted between the
+# copy and the rewrite cannot leave a half-stripped file for the reuse guard to adopt as
+# finished.
+_strip_apk_abis() { # $1=source apk  $2=destination  $3=build arch
+	local src=$1 dst=$2 arch=$3
+	local keep tmp="${dst}.strip.tmp"
+	keep=$(_striplibs_keep_of_arch "$arch")
+	keep=${keep//,/ }
+	local -a drop=()
+	local name abi
+	while IFS= read -r name; do
+		[[ "$name" =~ ^(\./)?lib/([^/]+)/ ]] || continue
+		abi=${BASH_REMATCH[2]}
+		case "$abi" in
+			armeabi | armeabi-v7a | arm64-v8a | x86 | x86_64 | mips | mips64) ;;
+			*) continue ;;
+		esac
+		if [[ " $keep " == *" $abi "* ]]; then continue; fi
+		# zip folds a leading "./" out of the *pattern* while the stored name keeps it, so
+		# an exact "./lib/x86/libso.so" argument matches nothing and only reports rc 12
+		# (measured). Spelling that prefix as the wildcard it has to be still anchors on
+		# the "./lib/<abi>/<file>" tail: the broad "*lib/<abi>/…" form reaches it too, but
+		# takes an app's "assets/engine/lib/x86/…" payload with it, which is why exact
+		# names are used everywhere else.
+		if [[ "$name" == ./* ]]; then
+			drop+=("*$name")
+		else
+			drop+=("$name")
+		fi
+	done < <(unzip -Z1 "$src" 2>/dev/null | tr -d '\r')
+
+	if [ ${#drop[@]} -eq 0 ]; then
+		cp -f "$src" "$dst"
+		return 0
+	fi
+	rm -f "$tmp"
+	cp -f "$src" "$tmp" || return 1
+	if ! zip -q -d "$tmp" "${drop[@]}" 2>/dev/null; then
+		rm -f "$tmp"
+		return 1
+	fi
+	mv -f "$tmp" "$dst" || {
+		rm -f "$tmp"
+		return 1
+	}
 	return 0
 }
 
@@ -5843,28 +5904,20 @@ build_rv() {
 				fi
 			fi
 		else
-		stock_apk_to_patch="${TEMP_DIR}/${file_prefix}-${version_f}-${arch_f}.stripped.apk"
-		if [ ! -f "$stock_apk_to_patch" ]; then
-			cp -f "$stock_apk" "$stock_apk_to_patch"
-			if [ "$arch" = "arm64-v8a" ]; then
-				zip -d "$stock_apk_to_patch" "lib/armeabi-v7a/*" "lib/x86_64/*" "lib/x86/*" >/dev/null 2>&1 || :
-			elif [ "$arch" = "arm-v7a" ]; then
-				zip -d "$stock_apk_to_patch" "lib/arm64-v8a/*" "lib/x86_64/*" "lib/x86/*" >/dev/null 2>&1 || :
-			elif [ "$arch" = "x86" ]; then
-				zip -d "$stock_apk_to_patch" "lib/arm64-v8a/*" "lib/x86_64/*" "lib/armeabi-v7a/*" >/dev/null 2>&1 || :
-			elif [ "$arch" = "x86_64" ]; then
-				zip -d "$stock_apk_to_patch" "lib/arm64-v8a/*" "lib/armeabi-v7a/*" "lib/x86/*" >/dev/null 2>&1 || :
-			else
-				zip -d "$stock_apk_to_patch" "lib/x86_64/*" "lib/x86/*" >/dev/null 2>&1 || :
+			stock_apk_to_patch="${TEMP_DIR}/${file_prefix}-${version_f}-${arch_f}.stripped.apk"
+			if [ ! -f "$stock_apk_to_patch" ]; then
+				if ! _strip_apk_abis "$stock_apk" "$stock_apk_to_patch" "$arch_f"; then
+					epr "Failed to strip foreign ABIs for $arch_f"
+					rm -f "$stock_apk_to_patch"
+					return 0
+				fi
 			fi
 		fi
-		fi
 
-		# Morphe's own strip, stating the keep decision the branch above just made, on
-		# both input kinds: a no-op when the trim or zip -d already removed those
-		# entries, and otherwise the only thing that reaches a bundle's base.apk libs,
-		# legacy armeabi/mips, or a lib/<dir> that is no ABI at all. It is also enforced
-		# by the patcher, where a `zip -d` failure is one the engine swallows.
+		# Morphe's own strip, stating the same keep decision at output assembly: a no-op
+		# when the engine's rewrite already removed those entries, and otherwise the only
+		# thing that reaches a bundle's base.apk libs or a lib/<dir> that names no ABI -
+		# neither of which _strip_apk_abis or the member trim can touch.
 		if [ "${PATCHER_KIND:-}" = morphe ] && [ "$RVB_MORPHE_STRIPLIBS" = true ]; then
 			patcher_args+=("--striplibs" "$(_striplibs_keep_of_arch "$arch_f")")
 		fi
