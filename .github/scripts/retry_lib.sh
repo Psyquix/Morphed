@@ -113,7 +113,7 @@ retry_tracked_keys() {
 		patcher-args arch build-mode version version-code \
 		dpi include-stock compression-level remove-rv-integrations-checks \
 		github-release-regex github-regex \
-		module-prop-name enable-module-update
+		module-prop-name enable-module-update preferred-format
 }
 
 # Keys a compiled config may carry that the builder DOES read but which must never

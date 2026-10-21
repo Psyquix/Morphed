@@ -60,7 +60,7 @@ TRACKED_KEYS = frozenset({
     "patcher-args", "arch", "build-mode", "version", "version-code", "dpi",
     "include-stock", "compression-level", "remove-rv-integrations-checks",
     "github-release-regex", "github-regex", "module-prop-name",
-    "enable-module-update",
+    "enable-module-update", "preferred-format",
 })
 # Read by the builder or the watcher, but never a reason to rebuild (see
 # retry_ignored_keys). `patch-folder` is the interesting one: ci_check_app_patches.py

@@ -139,6 +139,29 @@ module-prop-name = "some-app-module"                       # module prop name. d
 # where there is no published update branch to point at. default: true in CI, false locally
 enable-module-update = true
 dpi = "360-480dpi"                                         # apkmirror variant filter: rows whose `Screen DPI` column is listed here are preferred, 'auto' accepts whatever else the release has. Among the rows that pass arch/versionCode/dpi, the lowest `Minimum Version` wins so the build installs on the oldest device, then the widest architecture coverage. default: nodpi anydpi auto
+# Ordered download-format chain, space-delimited, from: apk apkm xapk apks.
+# A PREFIX of each source's variant order, never a filter: the named shape is fetched
+# first when a predicate-matching variant of it exists, and when it does not the source
+# still serves whatever else it has - nothing here hard-fails a store, and arch,
+# version and versionCode remain the hard gates they always were. Case is normalized;
+# a repeated token is dropped with a warning; an unknown token fails the compile.
+# What each source can honour:
+#   apkmirror  its rows only distinguish split bundles (.apkm/.xapk) from single-file
+#              APKs, so the chain collapses to that choice (badge-first stays the
+#              default when the key is unset).
+#   apkpure    picks /b/APK/ vs /b/XAPK/ among the arch-matching links; with the key
+#              unset the kind stays inherited from the page's featured link as before.
+#   apkcombo   reorders the version-page probes (apk / xapk / apks).
+#   archive    reorders the filename extension scan; the legacy `apk.apkm`-style
+#              composite names always stay in the tail.
+#   uptodown   chooses between the arch-labelled and the universal variant row by their
+#              xapk flag; the store's own file kind still decides the saved extension.
+#   fdroid, github, direct, cache_repo  ignored with a warning: one artifact per
+#              release, there is no variant to prefer.
+# Unset (the default, per app and file-level) keeps every source's own built-in order.
+# Universal-over-per-ABI coverage is NOT this key's axis: it is a download-quota policy
+# and stays as documented at each source above.
+preferred-format = "apk apkm"
 ```
 
 ## Which Config Edits Cost a Rebuild
@@ -154,7 +177,7 @@ last built from is recorded per app in `state/built_shape.json` (why:
   `brand`, `variant`, `sub-variant`, `app-name`, `pkg-name`, `patched-pkg-name`,
   `included-patches`, `excluded-patches`, `exclusive-patches`, `inclusive-patches`,
   `patcher-args`, `arch`, `build-mode`, `version`, `version-code`, `dpi`,
-  `include-stock`, `compression-level`, `remove-rv-integrations-checks`,
+  `preferred-format`, `include-stock`, `compression-level`, `remove-rv-integrations-checks`,
   `github-release-regex`, `github-regex`, `module-prop-name`, `enable-module-update`.
 - **Editing these does not:** any `*-dlurl` — they choose *where* the same artifact is
   fetched from, and if a store ever serves different bytes the build's own content

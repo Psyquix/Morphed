@@ -2262,6 +2262,87 @@ apkmirror_search() {
 	echo "$best_url"
 }
 
+# The config's ordered format chain (preferred-format), already validated and deduped
+# at compile in build.sh. Read through the calling build_rv's args (bash dynamic
+# scoping, as _cache_target_vc does with args[version_code]). Echoes nothing when the
+# key is unset — unset is NOT a value, it means each source keeps its own order.
+_pref_chain() {
+	# The +x test keeps this safe under set -u when no `args` array is in scope yet
+	# (offline callers source utils.sh at top level).
+	if [ -n "${args[*]+x}" ]; then printf '%s' "${args[preferred_format]:-}"; fi
+}
+
+# Class collapse for sources whose rows cannot tell the bundle sub-formats apart
+# (APKMirror's badge is BUNDLE|APK, Uptodown flags only is_bundle): the token 'apk'
+# selects class APK, any of apkm/xapk/apks selects class BUNDLE. $1=chain, the rest
+# the source's default class order. Chain entries first (first occurrence of a class
+# wins), unnamed classes appended in default order — a prefix, never a filter.
+# Empty chain returns the default verbatim.
+_pref_class_order() { # $1=chain $2...=default class order
+	local chain=$1 tok cls out="" seen=""
+	shift
+	if [ -z "$chain" ]; then printf '%s\n' "$@"; return; fi
+	for cls in "$@"; do
+		for tok in $chain; do
+			case "$tok" in
+				apk) tok=APK ;;
+				*) tok=BUNDLE ;;
+			esac
+			[ "$tok" = "$cls" ] || continue
+			case " $seen " in *" $cls "*) continue ;; esac
+			seen+=" $cls"; out+="$cls"$'\n'
+		done
+	done
+	for cls in "$@"; do
+		case " $seen " in *" $cls "*) continue ;; esac
+		out+="$cls"$'\n'
+	done
+	printf '%s' "$out"
+}
+
+# 1:1 format tokens over a source's own default order (APKCombo's page suffixes,
+# Archive's filename extensions): chain first, unnamed entries in the order given.
+# Nothing named: emit nothing — the caller's own built-in list IS the default, and a
+# blank line would become a phantom first candidate for every consumer.
+_pref_ext_order() { # $1=chain $2...=default ext order
+	local chain=$1 tok out="" seen=""
+	shift
+	[ -n "$chain" ] || return 0
+	for tok in $chain; do
+		case " $seen " in *" $tok "*) continue ;; esac
+		isoneof "$tok" "$@" || continue
+		seen+=" $tok"; out+="$tok"$'\n'
+	done
+	for tok in "$@"; do
+		case " $seen " in *" $tok "*) continue ;; esac
+		out+="$tok"$'\n'
+	done
+	printf '%s' "$out"
+}
+
+# normalize + validate + dedupe the preferred-format chain. Lives here rather than
+# inline in build.sh so the trace harness can exercise it without a signing identity
+# and a full config compile. Results in __PREF_CHAIN (never through command
+# substitution: an unknown token has to abort the compile, and an abort in a $()
+# subshell only ends the subshell). Lowercases the value — a format name is a
+# spelling, not a claim; an unknown token aborts — a typo has two readings and
+# guessing one is rule 3; a repeated token says nothing new, so it is dropped with a
+# warning rather than burning the runner's whole compile on it.
+_pref_format_validate() { # $1=raw value  $2=owner name for messages
+	local v=$1 owner=$2 tok seen="" keep=""
+	v=${v,,}
+	for tok in $v; do
+		if ! isoneof "$tok" apk apkm xapk apks; then
+			abort "ERROR: preferred-format '$v' for '$owner' contains unknown token '$tok': only 'apk', 'apkm', 'xapk', 'apks' are allowed"
+		fi
+		case " $seen " in
+			*" $tok "*) wpr "preferred-format: duplicate token '$tok' for '$owner' ignored" ;;
+			*) seen+=" $tok"; keep+="$tok " ;;
+		esac
+	done
+	__PREF_CHAIN=${keep% }
+}
+
 # Badge kinds in the order APKMirror's variant rows are considered, one per line:
 # split uploads (.apkm/.xapk) BEFORE single-file APKs. A bundle carries the ABIs and the
 # densities one build asked for in a single fetch, and it is the shape the morphe

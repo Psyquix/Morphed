@@ -61,6 +61,9 @@ DEF_BRAND=$(toml_get "$main_config_t" brand) || DEF_BRAND=""
 DEF_VARIANT=$(toml_get "$main_config_t" variant) || DEF_VARIANT=""
 DEF_SUB_VARIANT=$(toml_get "$main_config_t" sub-variant) || DEF_SUB_VARIANT=""
 DEF_DPI=$(toml_get "$main_config_t" dpi) || DEF_DPI="nodpi anydpi auto"
+# Download-format preference (see _pref_class_order in utils.sh). Unset asserts
+# nothing: every source keeps its own built-in variant order.
+DEF_PREFERRED_FORMAT=$(toml_get "$main_config_t" preferred-format) || DEF_PREFERRED_FORMAT=""
 DEF_ARCH=$(toml_get "$main_config_t" arch) || DEF_ARCH="both"
 DEF_BUILD_MODE=$(toml_get "$main_config_t" build-mode) || DEF_BUILD_MODE="apk"
 DEF_AUTHOR_NAME=$(toml_get "$main_config_t" author) || DEF_AUTHOR_NAME="nullcpy"
@@ -391,6 +394,14 @@ for table_name in $(toml_get_table_names); do
 	app_args[pkg_name]=$(toml_get "$t" pkg-name) || app_args[pkg_name]=""
 	app_args[patched_pkg_name]=$(toml_get "$t" patched-pkg-name) || app_args[patched_pkg_name]=""
 	app_args[dpi]=$(toml_get "$t" dpi) || app_args[dpi]="$DEF_DPI"
+	# Ordered format chain (space-delimited): a prefix of each source's variant order,
+	# never a filter. Validation lives in utils.sh (shared with its trace test) and
+	# writes the deduped, lowercased result to __PREF_CHAIN.
+	app_args[preferred_format]=$(toml_get "$t" preferred-format) || app_args[preferred_format]="$DEF_PREFERRED_FORMAT"
+	if [ -n "${app_args[preferred_format]}" ]; then
+		_pref_format_validate "${app_args[preferred_format]}" "$table_name"
+		app_args[preferred_format]="$__PREF_CHAIN"
+	fi
 	app_args[github_regex]=$(toml_get "$t" github-regex) || app_args[github_regex]=""
 	app_args[github_release_regex]=$(toml_get "$t" github-release-regex) || app_args[github_release_regex]=""
 	table_name_f=${table_name,,}
