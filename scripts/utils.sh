@@ -2302,11 +2302,11 @@ _pref_class_order() { # $1=chain $2...=default class order
 
 # 1:1 format tokens over a source's own default order (APKCombo's page suffixes,
 # Archive's filename extensions): chain first, unnamed entries in the order given.
-# Nothing named: emit nothing — the caller's own built-in list IS the default, and a
-# blank line would become a phantom first candidate for every consumer.
 _pref_ext_order() { # $1=chain $2...=default ext order
 	local chain=$1 tok out="" seen=""
 	shift
+	# Nothing named: emit nothing. The caller's own built-in list IS the default; a
+	# blank line here would become a phantom first candidate for every consumer.
 	[ -n "$chain" ] || return 0
 	for tok in $chain; do
 		case " $seen " in *" $tok "*) continue ;; esac
@@ -2349,8 +2349,17 @@ _pref_format_validate() { # $1=raw value  $2=owner name for messages
 # passthrough can ship without a merge; the arch, versionCode and DPI predicates inside
 # apkmirror_search still have to agree, and when no bundle row satisfies them the loop
 # falls through to plain APKs. Spelled out on its own because it is a stated preference,
-# not an implementation detail, and the trace test asserts it.
-_apkmirror_type_order() { printf 'BUNDLE\nAPK\n'; }
+# not an implementation detail, and the trace test asserts it. The preferred-format
+# chain reorders the two classes; unset keeps this order untouched.
+_apkmirror_type_order() {
+	local chain
+	chain=$(_pref_chain)
+	if [ -n "$chain" ]; then
+		_pref_class_order "$chain" BUNDLE APK
+	else
+		printf 'BUNDLE\nAPK\n'
+	fi
+}
 
 dl_apkmirror() {
 	local url=$1 version=${2// /-} output=$3 arch=$4 dpi=$5 is_bundle=false get_latest_ver=${6:-false} version_code=${7:-}
@@ -2690,6 +2699,33 @@ _apkpure_abi_of() { # $1=arch token; prints nothing when this arch has no store 
 	esac
 }
 
+# Pick the best link for one arch out of a candidate set: universal first, then the
+# exact ABI, then the pinned version code, then the newest code. Split out of
+# _apkpure_pick_link so the preferred-kind pass and the fallback passes there rank
+# their subsets with the same code and no duplicated ordering logic.
+_apkpure_best_of() { # $1=candidate lines  $2=abi  $3=version code to prefer
+	local cands picked
+	[ -n "${1:-}" ] || return 1
+	cands=$(printf '%s\n' "$1" | grep -E '[?&]nc=[^&]*%2C') || true
+	if [ -z "$cands" ] && [ -n "${2:-}" ]; then
+		cands=$(printf '%s\n' "$1" | grep -E "[?&]nc=${2}(&|$)") || true
+	elif [ -z "$cands" ] && [ -z "${2:-}" ]; then
+		return 1
+	fi
+	[ -z "$cands" ] && return 1
+	if [ -n "${3:-}" ]; then
+		picked=$(grep -F "versionCode=${3}" <<<"$cands") || true
+		[ -n "$picked" ] && cands="$picked"
+	fi
+	picked=$(printf '%s\n' "$cands" | awk '
+		{ vc = -1; if (match($0, /versionCode=[0-9]+/)) vc = substr($0, RSTART + 12, RLENGTH - 12) + 0
+		  if (vc > best) { best = vc; line = $0 } }
+		END { if (line) print line }
+	')
+	[ -z "$picked" ] && return 1
+	printf '%s\n' "$picked"
+}
+
 # Choose APKPure's link for the architecture being built.
 #
 # An APKPure download page carries exactly one <a id="download_link"> - the variant
@@ -2713,7 +2749,9 @@ _apkpure_abi_of() { # $1=arch token; prints nothing when this arch has no store 
 # because one fetch then serves every arch of the matrix and the store is asked once per
 # app rather than once per arch - avoiding repeated hits from one egress IP is the point
 # of the policy, since that is what gets an address blocked. atvTools publishes no
-# universal at all, which is why the per-ABI link is a fallback and not an error.
+# universal at all, which is why the per-ABI link is a fallback and not an error. That
+# axis is deliberately NOT the preferred-format knob: which ABI set a link covers is a
+# quota concern; the knob only ever reorders the apk-vs-xapk kind within the picks.
 #
 # Returns 1 whenever nothing matches - the caller then keeps using the featured link and
 # says so, which is all a single-variant app ever offers. Whether the fetched file really
@@ -2723,52 +2761,65 @@ _apkpure_abi_of() { # $1=arch token; prints nothing when this arch has no store 
 # $3 may be empty: a page with no featured anchor still lists its variants, and the
 # version code the build wants is then taken from $4 (resolved from patch metadata or the
 # config's version-code map by the build loop) instead of from the anchor.
+#
+# The chain-set path delegates the per-subset ranking to _apkpure_best_of; the unset
+# path keeps the historical order - arch across both kinds first, featured kind
+# filtering inside the arch set - untouched.
 _apkpure_pick_link() { # $1=page html  $2=arch  $3=featured url  $4=version code to prefer
-	local html=$1 arch=$2 featured=$3 want_vc=${4:-} abi="" want_type="" cands picked all_links
+	local html=$1 arch=$2 featured=$3 want_vc=${4:-} abi="" want_type="" picked all_links chain
 	abi=$(_apkpure_abi_of "$arch")
 	want_type=$(grep -oE '/b/(XAPK|APK)/' <<<"$featured" | head -1) || true
 	if [ -z "$want_vc" ]; then
 		want_vc=$(grep -oE 'versionCode=[0-9]+' <<<"$featured" | head -1 | cut -d= -f2) || true
 	fi
+	chain=$(_pref_chain)
 
 	all_links=$(grep -oE 'https://d\.apkpure\.com/b/(XAPK|APK)/[^"]+' <<<"$html" | sed 's/&amp;/\&/g' | sort -u) || true
 	[ -z "$all_links" ] && return 1
-	# Universal first, deliberately: one download then serves every arch in the matrix,
-	# so the store is asked once per app instead of once per arch - the reason for the
-	# policy is not spending download quota from one IP, and repeated per-arch hits are
-	# what gets an egress address blocked. Not every app publishes a universal (atvTools
-	# does not), so the per-ABI link is the fallback, never a hard requirement.
-	#
-	# The universal link is recognised by its percent-separated ABI list; matching the
-	# single-ABI form as a prefix would let "arm64-v8a%2Carmeabi-v7a" answer for
-	# arm64-v8a, which is what the universal case is for anyway - so the order below is
-	# what makes the distinction, not the pattern.
-	cands=$(printf '%s\n' "$all_links" | grep -E '[?&]nc=[^&]*%2C') || true
-	if [ -z "$cands" ] && [ -n "$abi" ]; then
-		cands=$(printf '%s\n' "$all_links" | grep -E "[?&]nc=${abi}(&|$)") || true
-	elif [ -z "$cands" ]; then
-		return 1
+
+	# No chain: the historical order exactly - arch rows are picked across BOTH kinds
+	# first (universal over the exact ABI, the quota policy), and the featured link's
+	# kind only filters within that arch set, so the caller's xapk-vs-apk handling does
+	# not silently change shape.
+	if [ -z "${chain:-}" ]; then
+		local cands
+		cands=$(printf '%s\n' "$all_links" | grep -E '[?&]nc=[^&]*%2C') || true
+		if [ -z "$cands" ] && [ -n "$abi" ]; then
+			cands=$(printf '%s\n' "$all_links" | grep -E "[?&]nc=${abi}(&|$)") || true
+		elif [ -z "$cands" ]; then
+			return 1
+		fi
+		if [ -n "$want_type" ]; then
+			picked=$(grep -F "$want_type" <<<"$cands") || true
+			[ -n "$picked" ] && cands="$picked"
+		fi
+		if [ -n "$want_vc" ]; then
+			picked=$(grep -F "versionCode=${want_vc}" <<<"$cands") || true
+			[ -n "$picked" ] && cands="$picked"
+		fi
+		picked=$(printf '%s\n' "$cands" | awk '
+			{ vc = -1; if (match($0, /versionCode=[0-9]+/)) vc = substr($0, RSTART + 12, RLENGTH - 12) + 0
+			  if (vc > best) { best = vc; line = $0 } }
+			END { if (line) print line }
+		')
+		[ -z "$picked" ] && return 1
+		printf '%s\n' "$picked"
+		return 0
 	fi
-	[ -z "$cands" ] && return 1
-	# Stay on the bundle kind the featured link used, so the caller's xapk-vs-apk
-	# handling (merge_splits vs a plain file) does not silently change shape.
+
+	# preferred-format outranks the featured link's kind when it is set: the chain names
+	# the shape the build wants, and the featured anchor only ever states the shape the
+	# store happened to advertise. Like every format order here it is a prefix, not a
+	# veto - each further pass keeps the arch/versionCode predicates from the pass above.
+	local pf_type
+	pf_type=$(set -- $chain; [ "$1" = apk ] && printf '/b/APK/' || printf '/b/XAPK/')
+	picked=$(_apkpure_best_of "$(printf '%s\n' "$all_links" | grep -F "$pf_type")" "$abi" "$want_vc") || true
+	[ -n "$picked" ] && { printf '%s\n' "$picked"; return 0; }
 	if [ -n "$want_type" ]; then
-		picked=$(grep -F "$want_type" <<<"$cands") || true
-		[ -n "$picked" ] && cands="$picked"
+		picked=$(_apkpure_best_of "$(printf '%s\n' "$all_links" | grep -F "$want_type")" "$abi" "$want_vc") || true
+		[ -n "$picked" ] && { printf '%s\n' "$picked"; return 0; }
 	fi
-	# Prefer the same version code APKPure featured; if the page lists older builds for
-	# this ABI, take the newest one rather than whatever appears first in the markup.
-	if [ -n "$want_vc" ]; then
-		picked=$(grep -F "versionCode=${want_vc}" <<<"$cands") || true
-		[ -n "$picked" ] && cands="$picked"
-	fi
-	picked=$(printf '%s\n' "$cands" | awk '
-		{ vc = -1; if (match($0, /versionCode=[0-9]+/)) vc = substr($0, RSTART + 12, RLENGTH - 12) + 0
-		  if (vc > best) { best = vc; line = $0 } }
-		END { if (line) print line }
-	')
-	[ -z "$picked" ] && return 1
-	printf '%s\n' "$picked"
+	_apkpure_best_of "$all_links" "$abi" "$want_vc"
 }
 
 # Did APKPure actually serve an app page? A version the store does not carry is answered
@@ -3148,7 +3199,16 @@ dl_apkcombo() {
 	local html="" dl_url="" final_url checkin page_url page compact_page any_url=""
 
 	if [ -n "$version" ]; then
-		local sfxs=("apk" "xapk" "apks")
+		local _pfc sfxs
+		_pfc=$(_pref_chain)
+		if [ -n "$_pfc" ]; then
+			# set + "$@" copies the whole word-split list; a here-string with
+			# `read -a` would take only its first line and drop the rest.
+			set -- $(_pref_ext_order "$_pfc" apk xapk apks)
+			sfxs=("$@")
+		else
+			sfxs=("apk" "xapk" "apks")
+		fi
 	else
 		local sfxs=("apk")
 	fi
@@ -3377,6 +3437,12 @@ dl_uptodown() {
 	local py_script="${CWD}/scripts/uptodown.py"
 	[ ! -f "$py_script" ] && [ -n "${BASH_SOURCE[0]:-}" ] && py_script="$(dirname "${BASH_SOURCE[0]}")/uptodown.py"
 
+	# preferred-format reaches the resolver as its own argument: Uptodown's rows carry
+	# only an is_xapk flag, so the chain collapses to a class there (see _pref_class_order)
+	# and the store's own kindFile still decides the final extension.
+	local pref_fmt
+	pref_fmt=$(_pref_chain)
+
 	local errf="${TEMP_DIR}/uptodown_resolve_$$.err"
 	if [ -n "$py_cmd" ] && [ -f "$py_script" ]; then
 		local py_info="" attempt
@@ -3386,7 +3452,7 @@ dl_uptodown() {
 		# blocks; stderr is captured (not discarded) so a hard failure reports
 		# its real cause instead of a blank "Failed to resolve".
 		for attempt in 1 2 3; do
-			if py_info=$("$py_cmd" "$py_script" download-url "$uptodown_dlurl" "$version" "$arch" 2>"$errf") && [ -n "$py_info" ]; then
+			if py_info=$("$py_cmd" "$py_script" download-url "$uptodown_dlurl" "$version" "$arch" "${pref_fmt:-}" 2>"$errf") && [ -n "$py_info" ]; then
 				break
 			fi
 			py_info=""
@@ -3617,9 +3683,25 @@ dl_archive() {
 	local url=$1 version=$2 output=$3 arch=$4 is_bundle=${5:-false} get_latest_ver=${6:-false} version_code=${7:-}
 	local path="" version_f=${version// /}
 	local norm_resp="${__ARCHIVE_RESP__//$'\r'/}"
+	# Extension scan order, once for both passes below. The legacy composite names
+	# (apk.apkm/...) stay in the tail exactly where they always were: a chain token
+	# selects the plain spelling; when a file with a composite name is the only one
+	# present it is still found, one loop later than before.
+	local _pfa _exts
+	_pfa=$(_pref_chain)
+	if [ -n "$_pfa" ]; then
+		# set copies the word-split list (one entry per line) into the array - a here-
+		# string + `read -a` would stop after the first line and silently drop every
+		# later extension, including the composites. Positional parameters are local
+		# to the function, so the caller's "$@" is untouched.
+		set -- $(_pref_ext_order "$_pfa" apk apkm xapk apks) apk.apkm apk.xapk apk.apks
+		_exts=("$@")
+	else
+		_exts=("apk" "apkm" "xapk" "apks" "apk.apkm" "apk.xapk" "apk.apks")
+	fi
 	if [ -n "$version_code" ]; then
 		for a in "${arch// /}" "all"; do
-			for ext in "apk" "apkm" "xapk" "apks" "apk.apkm" "apk.xapk" "apk.apks"; do
+			for ext in "${_exts[@]}"; do
 				while IFS= read -r p; do
 					if [[ "$p" == *"${version_f#v}-${version_code}-${a}.${ext}" ]]; then
 						path="$p"
@@ -3631,7 +3713,7 @@ dl_archive() {
 	fi
 	if [ -z "$path" ]; then
 		for a in "${arch// /}" "all"; do
-			for ext in "apk" "apkm" "xapk" "apks" "apk.apkm" "apk.xapk" "apk.apks"; do
+			for ext in "${_exts[@]}"; do
 				while IFS= read -r p; do
 					if [[ "$p" == *"${version_f#v}-${a}.${ext}" ]]; then
 						path="$p"
@@ -5670,6 +5752,13 @@ build_rv() {
 
 					break
 				done
+				# The chain is a fetch-time ordering over variant lists; these sources
+				# serve exactly one artifact per release, so there is nothing to prefer.
+				# Warn-and-ignore, never an abort — the bytes they ship are still valid.
+				if [ -f "$stock_apk" ] && [ -n "${args[preferred_format]:-}" ] &&
+					isoneof "$dl_p" cache_repo direct github fdroid; then
+					wpr "preferred-format '${args[preferred_format]}' has no effect on source '$dl_p' for '$table': it serves one artifact per release"
+				fi
 				local _be
 				if [ "${MORPHE_PASSTHROUGH_ACTIVE:-false}" = true ]; then
 					if _be=$(_bundle_ext_of "$stock_apk"); then

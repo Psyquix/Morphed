@@ -242,7 +242,20 @@ def get_versions(base_url: str, allow_all: bool = False) -> list[str]:
     return versions
 
 
-def resolve_download_variant(base_url: str, version: str, arch: str = "") -> tuple[str, str, bool]:
+def _fmt_class(token: str) -> str:
+    """preferred-format token -> the only two classes an Uptodown row can show:
+    a row is xapk-flagged or it is not. Mirrors _pref_class_order in utils.sh."""
+    return "apk" if token == "apk" else "bundle"
+
+
+def _preferred_class(prefer_formats: str) -> str | None:
+    """First class named by the (space-delimited) preferred-format chain, or None
+    when unset — unset keeps the historical arch-specific-over-universal pick."""
+    toks = (prefer_formats or "").split()
+    return _fmt_class(toks[0]) if toks else None
+
+
+def resolve_download_variant(base_url: str, version: str, arch: str = "", prefer_formats: str = "") -> tuple[str, str, bool]:
     """Returns (app_id, file_id, is_bundle)"""
     clean_url = clean_page_url(base_url)
     main_html = fetch_web_page(clean_url)
@@ -313,16 +326,29 @@ def resolve_download_variant(base_url: str, version: str, arch: str = "") -> tup
                     is_xapk = ('title="xapk"' in sec or 'class="xapk"' in sec)
 
                     if arch and (arch in node_arch):
+                        if specific_file_id is None and not prefer_formats:
+                            specific_file_id = (cur_fid, is_xapk)
+                            break
                         specific_file_id = (cur_fid, is_xapk)
-                        break
                     elif any(u in node_arch for u in ("universal", "arm64-v8a, armeabi-v7a", "noarch")):
                         if not universal_file_id:
                             universal_file_id = (cur_fid, is_xapk)
 
-                if specific_file_id:
-                    file_id, is_bundle = specific_file_id
-                elif universal_file_id:
-                    file_id, is_bundle = universal_file_id
+                # Without a chain the historical pick stands: the row labelled for this
+                # arch, the universal row only as its fallback. With one, the chain's
+                # class wins across the two rows — but ONLY across the arch axis: which
+                # ABIs a row carries is never traded for a format (ADR 0007 says nothing
+                # here, the store simply labels rows), and kindFile still decides the
+                # final extension. The key picks rows, it does not relabel bytes.
+                pref = _preferred_class(prefer_formats)
+                if pref is None:
+                    chosen = specific_file_id or universal_file_id
+                else:
+                    ranked = [c for c in (specific_file_id, universal_file_id) if c]
+                    preferred_rows = [c for c in ranked if ("bundle" if c[1] else "apk") == pref]
+                    chosen = preferred_rows[0] if preferred_rows else (ranked[0] if ranked else None)
+                if chosen:
+                    file_id, is_bundle = chosen
     except Exception:
         pass
 
@@ -399,7 +425,8 @@ def main():
         url = sys.argv[2]
         version = sys.argv[3]
         arch = sys.argv[4] if len(sys.argv) > 4 else ""
-        app_id, file_id, is_bundle = resolve_download_variant(url, version, arch)
+        prefer = sys.argv[5] if len(sys.argv) > 5 else ""
+        app_id, file_id, is_bundle = resolve_download_variant(url, version, arch, prefer)
         token = get_auth_token()
         cdn_url = get_cdn_download_url(app_id, file_id, token)
         print(f"{cdn_url}\t{str(is_bundle).lower()}")

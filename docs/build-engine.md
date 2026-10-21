@@ -381,6 +381,22 @@ Supporting machinery:
   bundle row satisfies arch, versionCode and DPI. A version no row satisfies is not
   guessed at: the source is skipped and the next one tried, and the bytes are still
   judged by the arch-honesty gate above.
+- **Format preference (`preferred-format`)** — the config key is an ordered chain of
+  `apk`/`apkm`/`xapk`/`apks` fed to every source that has a variant choice to make, as a
+  **prefix of that source's own order, never a filter**: the named shape is tried first
+  among the rows/links that satisfy the hard predicates, and anything the chain does not
+  name keeps the source's built-in tail (`_pref_class_order`/`_pref_ext_order` in
+  `utils.sh`). Sources differ in what they can distinguish — APKMirror's badge is only
+  split-vs-single-file, APKPure's kind is a URL path, APKCombo's is which version page it
+  probes, Archive's is the filename extension, Uptodown's is a row flag whose final file
+  kind the store still decides — so a chain finer than a source's granularity collapses
+  to it silently. F-Droid, GitHub, `direct` and `cache_repo` serve one artifact per
+  release: the key is warned-about and ignored there. Unset everywhere, each source keeps
+  its historical order byte-for-byte (APKMirror badge-first, Archive/APKCombo plain-first),
+  which is what every existing golden was produced under. Universal-over-per-ABI coverage
+  is deliberately **not** part of this axis: it is a download-quota policy (one fetch
+  serving the whole matrix is what keeps an egress IP off a store's block list) and stays
+  hard-wired at APKPure/APKCombo regardless of the chain.
 - **Transfer guards** — `_req` sets connect *and* absolute ceilings plus a low-
   speed stall guard, because a mirror that trickles would otherwise hold a build
   slot forever.
