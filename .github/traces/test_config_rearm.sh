@@ -140,17 +140,27 @@ run_case arch_gone_deletes \
 	"$SHAPE"
 [[ "$(jqx -r '.stable | has("App-x")' <<<"$OUT_STATE")" == "false" ]] || fail "case8 disjoint arch kept: $OUT_STATE"
 
-# --- 10. an attempt must not lose the fingerprint (the re-arm-forever guard) -----
-# build_update_retry_list.sh rewrites the pending entry when a build fails. If that
-# rewrite dropped `cfg`, the watcher would see a baseline-less entry on its next run
-# and re-arm it again, buying an infinite retry loop - exactly what parking exists to
-# stop. So the merge is tested where it is written, then fed back to the watcher.
-run_build_case() { # <name> <pending-json>
+# --- 10. a download attempt must not lose the fingerprint (the re-arm-forever guard)
+# build_update_retry_list.sh rewrites the pending entry when a DOWNLOAD exhausts. If
+# that rewrite dropped `cfg`, the watcher would see a baseline-less entry on its next
+# run and re-arm it again, buying an infinite retry loop - exactly what parking exists
+# to stop. So the merge is tested where it is written, then fed back to the watcher.
+# The retry class is a download failure; the default fixture is a `_dl` record (only
+# `_dl` files re-queue — every other failure suffix settles, checked in 11b/11c).
+run_build_case() { # <name> <pending-json> [f1-file] [f1-json] [f2-file] [f2-json]
 	local name=$1 pb=$2
+	local f1=${3:-} j1=${4:-} f2=${5:-} j2=${6:-}
+	# A default is set on its own line, never inside ${4:-{...}} - a `}` in that
+	# parameter-expansion default terminates the expansion early and truncates the JSON.
+	[ -n "$f1" ] || f1=temp/failures/appx_dl.json
+	if [ -z "$j1" ]; then
+		j1='{"type":"dl_exhausted","app":"App-x","arch":"arm64-v8a"}'
+	fi
 	CASE="$t/$name"
 	mkdir -p "$CASE/state" "$CASE/temp/failures"
 	printf '%s\n' '{"patches-version":"stable","App-x":{"enabled":true,"pkg-name":"com.x"}}' >"$CASE/pool.stable.json"
-	printf '%s\n' '{"app":"App-x","arch":"arm64-v8a"}' >"$CASE/temp/failures/appx.json"
+	printf '%s\n' "$j1" >"$CASE/$f1"
+	[ -n "$f2" ] && printf '%s\n' "$j2" >"$CASE/$f2"
 	printf '%s\n' '{"stable":{"Other-y":["arm-v7a","arm64-v8a"]},"beta":{}}' >"$CASE/state/built_shape.json"
 	printf '%s\n' "$pb" >"$CASE/state/pending_builds.json"
 	(
@@ -159,6 +169,7 @@ run_build_case() { # <name> <pending-json>
 			bash "$REPO/.github/scripts/build_update_retry_list.sh" >"$CASE/log" 2>&1
 	) || fail "$name: build_update_retry_list.sh exited non-zero"
 	OUT_STATE=$(cat "$CASE/state/pending_builds.json")
+	OUT_STATE2=$(cat "$CASE/state/built_shape.json")
 }
 
 run_build_case build_preserves_cfg \
@@ -168,12 +179,47 @@ run_build_case build_preserves_cfg \
 	fail "case10 the attempt dropped the fingerprint: $OUT_STATE"
 
 # --- 11. and the watcher, after that attempt, still does not re-arm --------------
-# The entry is a live (non-parked) retry, so the trigger stays high on its own
+# The entry is a live (non-parked) download retry, so the trigger stays high on its own
 # account; what must NOT happen is the budget being reset behind the build's back.
 run_case after_attempt_no_rearm "$STABLE_CFG" "$OUT_STATE" "$SHAPE"
 grep -q "Re-armed" <<<"$OUT_LOG" && fail "case11 re-armed an app whose config never changed: $OUT_LOG"
 [[ "$(jqx -r '.stable["App-x"].attempts' <<<"$OUT_STATE")" == "1" ]] ||
 	fail "case11 the watcher reset an attempt it had no reason to reset: $OUT_STATE"
+
+# --- 11b. a patcher abort is settled, not retried -------------------------------
+# A `_pf` record must not create a retry entry: re-running the same engine over the
+# same inputs aborts identically, so only a patch-bundle trigger or a config edit can
+# fix it. Its attempted arch falls into the success side and settles into built_shape,
+# so the watcher stops re-flagging it as "new" (the same settle `_np` relies on).
+run_build_case pf_settled '{"stable":{},"beta":{}}' \
+	temp/failures/appx_pf.json '{"type":"patch_failed","app":"App-x","arch":"arm64-v8a"}'
+[[ "$(jqx -r '.stable | has("App-x")' <<<"$OUT_STATE")" == "false" ]] ||
+	fail "case11b a patcher abort created a retry entry: $OUT_STATE"
+[[ "$(jqx -r '.stable["App-x"].arches | index("arm64-v8a") != null' <<<"$OUT_STATE2")" == "true" ]] ||
+	fail "case11b patcher abort arch did not settle into built_shape: $OUT_STATE2"
+
+# --- 11c. a hard build abort is settled, not retried ----------------------------
+# The plain `<slug>.json` descriptor (build_failed) follows the same rule: no retry
+# entry, arch settled. This is the class the change removed from the retry queue.
+run_build_case build_settled '{"stable":{},"beta":{}}' \
+	temp/failures/appx.json '{"type":"build_failed","app":"App-x","arch":"arm64-v8a"}'
+[[ "$(jqx -r '.stable | has("App-x")' <<<"$OUT_STATE")" == "false" ]] ||
+	fail "case11c a build abort created a retry entry: $OUT_STATE"
+[[ "$(jqx -r '.stable["App-x"].arches | index("arm64-v8a") != null' <<<"$OUT_STATE2")" == "true" ]] ||
+	fail "case11c build abort arch did not settle into built_shape: $OUT_STATE2"
+
+# --- 11d. mixed: a download retry coexists with a settled patcher abort ---------
+# The coarse rule must be per-arch, not per-app: the `_dl` arch re-queues live while a
+# sibling `_pf` arch settles — the abort must not park or suppress the download retry.
+run_build_case dl_retry_plus_pf_settle '{"stable":{},"beta":{}}' \
+	temp/failures/appx_dl.json '{"type":"dl_exhausted","app":"App-x","arch":"arm64-v8a"}' \
+	temp/failures/appx_pf.json '{"type":"patch_failed","app":"App-x (arm-v7a)","arch":"arm-v7a"}'
+[[ "$(jqx -r '.stable["App-x"].reason' <<<"$OUT_STATE")" == "retry" ]] ||
+	fail "case11d download retry not queued: $OUT_STATE"
+[[ "$(jqx -c '.stable["App-x"].arches' <<<"$OUT_STATE")" == '["arm64-v8a"]' ]] ||
+	fail "case11d retry entry leaked the settled arch: $OUT_STATE"
+[[ "$(jqx -r '.stable["App-x"].arches | index("arm-v7a") != null' <<<"$OUT_STATE2")" == "true" ]] ||
+	fail "case11d settled patcher-abort arch missing from built_shape: $OUT_STATE2"
 
 # --- 12. an app that left the config loses its queue entry, not its memory ------
 # ADR 0010 promises that removal prunes the pending entry, and a key the config no

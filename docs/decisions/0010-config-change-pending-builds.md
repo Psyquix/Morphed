@@ -95,9 +95,15 @@ nothing else moved. `ci_generate_configs.sh` force-enables pending keys, but nev
 one the human set `enabled = false` in the TOML.
 
 **Build job** (`build_update_retry_list.sh`, after the failure report) reconciles
-the two files from what just happened: attempted `(app, arch)` pairs with no
-failure record move into `built_shape` and drop out of `pending`; failed pairs are
-upserted into `pending` with `reason: retry` and `attempts + 1`. It commits them
+the two files from what just happened: attempted `(app, arch)` pairs move into
+`built_shape` and drop out of `pending` unless they still owe a retry, and only
+**download-exhaustion** failures are owed one — a `_dl` pair is upserted into `pending`
+with `reason: retry` and `attempts + 1`. A build abort, a patcher abort (`_pf`) and a
+patch-set rejection (`_np`) are **settled, not retried**: re-running the engine over
+unchanged inputs reproduces the same abort, so the retry buys nothing, and the fix
+(a patch-bundle release or a config edit) re-triggers the app through its own path
+anyway. Those arches therefore advance `built_shape`, which is what stops the watcher
+re-flagging them as "new" every run. It commits them
 to `data` alongside the artifact hashes.
 
 Effective arch is resolved with the same precedence the build uses —

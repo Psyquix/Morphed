@@ -183,13 +183,20 @@ Step order, with the reason each is where it is:
    run (Route B) — non-build failures still notify normally.
 7b2. **Reconcile pending-build state** (`build_update_retry_list.sh`,
    `if: !cancelled()`): reads the same `temp/failures/` records and updates
-   `state/built_shape.json` + `state/pending_builds.json` for this channel — an
-   attempted app/arch with no failure record is recorded as built, its tracked config
-   map stamped from the pool it just built (the baseline only advances when something
-   shipped, so a failed rebuild cannot forgive the edit), and is cleared from
-   the pending list, a failed arch still requested is re-queued as a retry and
-   parked once it hits `RVB_RETRY_MAX`, and `_np` (no-patch) records are not retried
-   because the bundle updating re-triggers the app anyway. The entry is merged, not
+   `state/built_shape.json` + `state/pending_builds.json` for this channel. **Only
+   download exhaustion (`_dl`) is retried**: a `_dl` arch still requested is re-queued
+   as a retry and parked once it hits `RVB_RETRY_MAX`. Every other failure class — a
+   build abort (`<slug>.json`), a patcher abort (`_pf`) and a patch-set rejection
+   (`_np`) — is **settled, not retried**: re-running the same engine over the same
+   inputs reproduces the same abort, so it spends a build slot to learn nothing. The
+   fix for those is a patch-bundle release or a config edit, and both already
+   re-trigger the app independently (`TRIGGER_STABLE` / the watcher's re-arm), so the
+   retry queue has nothing to add. A settled arch is merged into `built_shape` (its
+   tracked config map stamped from the pool it just built) so neither the retry queue
+   nor the watcher's "arch never built → reason new" path re-nags it every run; the
+   baseline is held back only for an arch that still owes a download retry, or the
+   pending retry would forgive the very edit it is re-queuing (decisions/0014). The
+   entry is merged, not
    replaced, so the watcher's `cfg` fingerprint survives the attempt — dropping it
    would make every run look like a config change and re-arm the app forever. A
    dedicated commit step

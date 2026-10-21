@@ -5489,9 +5489,10 @@ build_rv() {
 									cached_all_apk="${apk_cache_dir}/${pkg_name}-${version_f}${vc_infix}-all.apk"
 									target_version_code="$downloaded_vc"
 									DL_VC_ARCH_FALLBACK=""
-									# Stamp the still-open failure descriptor so the retry writer parks
-									# this app (a code-fallback failure is genuine, not transient) and the
-									# report can say so. On success the parent deletes the descriptor.
+									# Stamp the still-open failure descriptor with vc_fallback so the report
+									# can name this a genuine code→arch incompatibility, not a transient miss
+									# (build failures are settled, never re-queued, so the stamp no longer drives
+									# a retry decision). On success the parent deletes the descriptor.
 									local _rk_fd="${TEMP_DIR}/failures/$(failure_slug "$table").json"
 									if [ -f "$_rk_fd" ]; then
 										jq -c '. + {vc_fallback:true}' "$_rk_fd" > "${_rk_fd}.tmp" 2> /dev/null && mv -f "${_rk_fd}.tmp" "$_rk_fd" || rm -f "${_rk_fd}.tmp"

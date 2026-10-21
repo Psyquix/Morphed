@@ -29,6 +29,10 @@ Once `build_rv` has a resolved version it writes `temp/failures/<slug>.json`
 (app, version, `vc`, arch, `patches_src`); the requested arch is already part of
 the display label, so `<slug>` (= label lowercased, non-alphanumerics collapsed
 to `-`) is identical in the pooled child, the serial parent and the CI step.
+The retry writer (`build_update_retry_list.sh`) re-queues **only** the download-
+exhaustion record below; a build abort, a patcher abort and a patch-set rejection
+are settled, not retried, because a retry reproduces the same abort — see
+[ci-pipelines.md](ci-pipelines.md#the-build-job-buildyml).
 - **Build failure** — if the app then aborts, the parent copies that child's log
   to `temp/failures/<slug>.log` alongside the descriptor. A clean return deletes
   both. Serial mode `tee`s the build output to the same path so a single job also
@@ -53,12 +57,15 @@ to `-`) is identical in the pooled child, the serial parent and the CI step.
   moves the captured log to `<slug>_pf.log` before its sweep; the report renders the
   pair in the Build Failed section. When the artifact shipped anyway (a dedup skip
   after an earlier mode aborted in the same build), the child deletes the pair — a
-  published app must not re-queue itself.
+  published app must not be reported as failed. Like a build abort, a patcher abort is
+  settled (not retried) by `build_update_retry_list.sh`: only a patch-bundle release
+  or a config edit can fix it, and both re-trigger the app on their own.
 - **Version-code fallback** — a build-failure descriptor also carries
   `vc_fallback: true` when the arch was already fetched through the code→arch fallback
   (stage 4) and still failed. That is a genuine incompatibility, not a transient miss, so
-  the retry writer parks it rather than re-queueing it and the report says so
-  ([decisions/0011](decisions/0011-version-code-fallback-to-arch.md)).
+  the report says so ([decisions/0011](decisions/0011-version-code-fallback-to-arch.md)).
+  It no longer drives a retry decision: build failures are settled, not re-queued, so the
+  stamp only colours the notification wording now.
 
 `temp/failures/` is wiped at the START of `build.sh` and deliberately survives the
 end-of-run sweep, so the `build.yml` "Report build failures" step can read it.
