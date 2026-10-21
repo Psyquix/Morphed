@@ -216,15 +216,15 @@ def main():
     gh_repo = os.environ.get("GITHUB_REPOSITORY") or "nullcpy/rvb"
     donate_link = os.environ.get("RELEASE_NOTES_DONATE_LINK") or "https://fahim-ahmed05.github.io/donate"
     website_link = os.environ.get("RELEASE_NOTES_WEBSITE_LINK") or "https://nullcpy.github.io"
-    # No built-in group handle: the fallback used to name one specific chat's
+    # No built-in community handle: the fallback used to name one specific chat's
     # username, so after a rename every release body kept advertising a dead link
     # and nothing failed. An unset variable omits the entry instead of guessing.
-    tg_link = os.environ.get("RELEASE_NOTES_TG_LINK") or ""
-    if not tg_link:
-        print("Warning: RELEASE_NOTES_TG_LINK is not set; omitting the Group link from the release notes.")
+    discord_link = os.environ.get("RELEASE_NOTES_DISCORD_LINK") or ""
+    if not discord_link:
+        print("Warning: RELEASE_NOTES_DISCORD_LINK is not set; omitting the Discord link from the release notes.")
     footer = [f"🌐 [GitHub](https://github.com/{gh_repo})"]
-    if tg_link:
-        footer.append(f"💬 [Group]({tg_link})")
+    if discord_link:
+        footer.append(f"💬 [Discord]({discord_link})")
     footer += [f"☕ [Donate]({donate_link})", f"🔗 [Website]({website_link})"]
     lines.append(" | ".join(footer))
     lines.append("")

@@ -159,7 +159,7 @@ jobs:
           RVB_MORPHE_PASSTHROUGH: "${{ vars.RVB_MORPHE_PASSTHROUGH || 'true' }}"
           RVB_MORPHE_STRIPLIBS: "${{ vars.RVB_MORPHE_STRIPLIBS || 'true' }}"
           RVB_DEDUP_MODE: ${{ env.RVB_DEDUP_MODE }}
-          RELEASE_NOTES_TG_LINK: ${{ vars.RELEASE_NOTES_TG_LINK }}
+          RELEASE_NOTES_DISCORD_LINK: ${{ vars.RELEASE_NOTES_DISCORD_LINK }}
           RELEASE_NOTES_DONATE_LINK: "${{ vars.RELEASE_NOTES_DONATE_LINK || 'https://fahim-ahmed05.github.io/donate' }}"
           RELEASE_NOTES_WEBSITE_LINK: "${{ vars.RELEASE_NOTES_WEBSITE_LINK || 'https://nullcpy.github.io' }}"
         run: |
