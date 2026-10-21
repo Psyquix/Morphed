@@ -113,15 +113,20 @@ retry_tracked_keys() {
 		patcher-args arch build-mode version version-code \
 		dpi include-stock compression-level remove-rv-integrations-checks \
 		github-release-regex github-regex \
-		module-prop-name enable-module-update preferred-format
+		module-prop-name enable-module-update
 }
 
 # Keys a compiled config may carry that the builder DOES read but which must never
 # wake an app. Listed so the completeness check can prove they were considered rather
 # than forgotten; `*-dlurl` is matched by suffix, not by name, so a new store cannot
 # slip in as an unclassified key.
+# `preferred-format` is in here, not with the tracked keys, because the rebuild it
+# would ask for usually cannot happen: the engine's cache check (all archs present →
+# "Skipping download!") never reaches the variant pickers the key steers, and when a
+# fetch does happen the stock cache and the content hash suppress the identical result.
+# It is transport-class by outcome: the artifact an app already has does not change.
 retry_ignored_keys() {
-	printf '%s\n' enabled author author-page patch-folder
+	printf '%s\n' enabled author author-page patch-folder preferred-format
 }
 
 # retry_tracked_key <name> / retry_ignored_key <name> — is this key classified?

@@ -161,6 +161,8 @@ dpi = "360-480dpi"                                         # apkmirror variant f
 # Unset (the default, per app and file-level) keeps every source's own built-in order.
 # Universal-over-per-ABI coverage is NOT this key's axis: it is a download-quota policy
 # and stays as documented at each source above.
+# Setting it does not rebuild anything: a cached stock APK skips the fetch it steers, so
+# the preference simply applies on the next build that happens for a real reason.
 preferred-format = "apk apkm"
 ```
 
@@ -177,11 +179,13 @@ last built from is recorded per app in `state/built_shape.json` (why:
   `brand`, `variant`, `sub-variant`, `app-name`, `pkg-name`, `patched-pkg-name`,
   `included-patches`, `excluded-patches`, `exclusive-patches`, `inclusive-patches`,
   `patcher-args`, `arch`, `build-mode`, `version`, `version-code`, `dpi`,
-  `preferred-format`, `include-stock`, `compression-level`, `remove-rv-integrations-checks`,
+  `include-stock`, `compression-level`, `remove-rv-integrations-checks`,
   `github-release-regex`, `github-regex`, `module-prop-name`, `enable-module-update`.
 - **Editing these does not:** any `*-dlurl` — they choose *where* the same artifact is
   fetched from, and if a store ever serves different bytes the build's own content
-  fingerprint says so on the next real build; `patch-folder` — the CI uses it to
+  fingerprint says so on the next real build; `preferred-format` — it steers a fetch the
+  cache check usually skips entirely, so setting it wakes no app: it takes effect on the
+  next build that happens for a real reason; `patch-folder` — the CI uses it to
   attribute patch-bundle folders to an app and the engine never reads it, so a rebuild
   over it reproduces identical bytes and the duplicate-build hash withholds them; the
   corrected attribution lands with the source's next release, when the bundle is hashed

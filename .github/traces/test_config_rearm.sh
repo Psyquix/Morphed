@@ -454,4 +454,25 @@ print('ok' if c.unknown_key('$ghost') is None else 'rejected')")" = "rejected" ]
 		fail "$ghost is accepted by the compiler although no code reads it"
 done
 
+# --- 22. preferred-format is classified as never-wake (the ruling of 2026-10-21) --
+# The key only steers a fetch, and the cache check skips the fetch for anything already
+# built — so a rebuild over its edit reproduces the artifact an app already has. Both
+# lists must agree it belongs with the transport keys, and the case fails if anyone
+# re-tracks it on one side only (the parity above would still pass against the other).
+retry_ignored_key preferred-format || fail "preferred-format must be ignored by the watcher"
+if retry_tracked_key preferred-format; then fail "preferred-format must not wake a rebuild"; fi
+[ "$(cd "$REPO/.github/scripts" && python3 -c "
+import compile_patch_configs as c
+print('ignored' if 'preferred-format' in c.UNTRACKED_KEYS else 'wrong')" 2>/dev/null)" = "ignored" ] ||
+	fail "preferred-format is not in the compiler's UNTRACKED_KEYS"
+
+# --- 23. end to end: adding the key to a built app wakes nothing ------------------
+# The behavioral half of the same ruling, shaped like case 17: the config gains
+# preferred-format over a seeded build, and the watcher must leave the pool, the
+# trigger and the announcement all untouched.
+CFG_PFMT=$(printf '%s\n' "$STABLE_CFG" | jqx -c '.["App-x"]["preferred-format"] = "apk apkm"')
+run_case fmt_edit_no_rearm "$CFG_PFMT" '{"stable":{},"beta":{}}' "$SEED_X"
+[[ "$OUT_PENDING" == "[]" ]] || fail "case23 rebuilt for a format-preference edit: $OUT_PENDING"
+[[ "$OUT_TRIGGER" == "0" ]] || fail "case23 a format-preference edit moved state: $OUT_TRIGGER"
+
 echo "CONFIG RE-ARM TESTS: PASS"

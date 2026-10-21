@@ -73,10 +73,11 @@ longer mean anything.
 | edit | rebuild? | why |
 |---|---|---|
 | patch source publishes a release; app version moves | ✅ as before | untouched by this record |
-| `patches-source`, `patches-version` (pin), `cli-source`, `included`/`excluded`/`exclusive`/`inclusive-patches`, `patcher-args`, `brand`/`variant`/`sub-variant`, `app-name`, `pkg-name`, `arch`, `build-mode`, `version`, `version-code`, `dpi`, `preferred-format`, `include-stock`, `compression-level`, `module-prop-name`, `enable-module-update` | ✅ new | the tracked map differs. `preferred-format` sits here, not with transport, because it decides *which variant's bytes* a source serves — like `dpi`, it selects among candidates rather than naming a place. |
+| `patches-source`, `patches-version` (pin), `cli-source`, `included`/`excluded`/`exclusive`/`inclusive-patches`, `patcher-args`, `brand`/`variant`/`sub-variant`, `app-name`, `pkg-name`, `arch`, `build-mode`, `version`, `version-code`, `dpi`, `include-stock`, `compression-level`, `module-prop-name`, `enable-module-update` | ✅ new | the tracked map differs |
 | `patch-folder` | ❌ | read by `ci_check_app_patches.py` to attribute bundle folders to an app, and by nothing in the engine — so a rebuild reproduces identical bytes and the content hash withholds them. The corrected attribution lands with the source's next release, when the bundle is hashed again. |
 | `both → apk` (a narrowing of `build-mode` or `arch`) | ❌ | no rebuild can un-publish; see below |
 | any `*-dlurl` | ❌ | transport: the same version/versionCode/arch artifact arrives from another store. If a store ever serves different bytes, the build's own content fingerprint says so on the next real build |
+| `preferred-format` | ❌ | the rebuild it would ask for usually cannot deliver anything: the engine's cache check (all archs present → "Skipping download!") never reaches the variant pickers the key steers, and when a fetch does run the content hash suppresses the identical result. It applies on the next build that happens for a real reason, like a dlurl does |
 | `enabled = false → true` | ❌ unless a tracked field also moved | see [0010](0010-config-change-pending-builds.md)'s prune: the queue entry is retired, the memory is kept, so a pure toggle describes an order that is already satisfied |
 | `author`, `author-page` | ❌ | read from a config's file-level defaults only, never from an app block |
 

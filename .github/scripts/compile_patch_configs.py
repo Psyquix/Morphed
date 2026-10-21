@@ -60,14 +60,16 @@ TRACKED_KEYS = frozenset({
     "patcher-args", "arch", "build-mode", "version", "version-code", "dpi",
     "include-stock", "compression-level", "remove-rv-integrations-checks",
     "github-release-regex", "github-regex", "module-prop-name",
-    "enable-module-update", "preferred-format",
+    "enable-module-update",
 })
 # Read by the builder or the watcher, but never a reason to rebuild (see
 # retry_ignored_keys). `patch-folder` is the interesting one: ci_check_app_patches.py
 # uses it to attribute bundle files to an app, the engine never reads it, so a rebuild
 # over a change there reproduces identical bytes and the content hash suppresses them.
+# `preferred-format` joins it because the same suppression wins before the pickers even
+# run: a cached stock APK skips the download stage the key steers entirely.
 UNTRACKED_KEYS = frozenset(
-    {"enabled", "author", "author-page", "patch-folder"})
+    {"enabled", "author", "author-page", "patch-folder", "preferred-format"})
 
 
 def unknown_key(key):
