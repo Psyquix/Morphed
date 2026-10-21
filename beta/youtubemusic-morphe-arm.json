@@ -1,6 +1,6 @@
 {
-  "version": "v9.20.53 (patches dev.16.mpp)",
-  "versionCode": 260329,
+  "version": "v9.20.53 (patches dev.17.mpp)",
+  "versionCode": 260331,
   "zipUrl": "https://github.com/nullcpy/rvb/releases/download/beta/youtube-music-morphe-module-v9.20.53-arm-v7a.zip",
-  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260329.md"
+  "changelog": "https://raw.githubusercontent.com/nullcpy/rvb/update/changelogs/260331.md"
 }
