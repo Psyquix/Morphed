@@ -136,10 +136,27 @@ want_cls "armeabi-v7a" arm64-v8a NONE
 want_cls "arm64-v8a + armeabi-v7a" all NONE
 want_cls "" arm64-v8a NONE
 
-# --- bundle before APK (the caller's pass order)
+# --- bundle before APK (the caller's pass order), and the preferred-format chain
+# reordering it. Unset must stay exactly the historical order — every golden built
+# without the key depends on that pin.
 order=$(_apkmirror_type_order | tr '\n' ' ')
 [ "$order" = "BUNDLE APK " ] || fail "variant pass order must be 'BUNDLE APK', got '$order'"
 printf 'ok  %-46s %s\n' "apkmirror type pass order" "$order"
+for chain_case in "apk:APK BUNDLE " "apkm:BUNDLE APK " "xapk:BUNDLE APK " "apkm apk xapk:BUNDLE APK " "apk apk:APK BUNDLE "; do
+	chain=${chain_case%%:*}; want=${chain_case#*:}
+	(
+		declare -A args=([preferred_format]="$chain")
+		order=$(_apkmirror_type_order | tr '\n' ' ')
+		[ "$order" = "$want" ] || fail "chain '$chain' must pass classes '$want', got '$order'"
+	) || exit 1
+	printf 'ok  %-46s %s\n' "chain '$chain' class order" "$want"
+done
+(
+	declare -A args=()
+	order=$(_apkmirror_type_order | tr '\n' ' ')
+	[ "$order" = "BUNDLE APK " ] || fail "unset chain must keep 'BUNDLE APK', got '$order'"
+) || exit 1
+printf 'ok  %-46s %s\n' "unset chain keeps BUNDLE APK" ""
 
 if [ "$SH_OK" != true ]; then
 	echo "SKIP: the no-python mirror in utils.sh was not exercised - $HTMLQ is not"

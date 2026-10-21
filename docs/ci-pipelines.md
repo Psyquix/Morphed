@@ -11,7 +11,7 @@ GitHub's limits; notify reports failures.
 | [cleanup.yml](../.github/workflows/cleanup.yml) | Cleanup | `workflow_call`, `workflow_dispatch` | `clean` |
 | [manual-ci.yml](../.github/workflows/manual-ci.yml) | Manual CI | `workflow_dispatch` (config choice, optional `remove_apks`, `disable_dedup` checkbox) | `ci` |
 | [notify.yml](../.github/workflows/notify.yml) | Notify | `issues`/`pull_request` (debounced batch), `workflow_call` (immediate, when a needed job of the caller ended in `failure`) | drain: `notify-debounce` |
-| [trace-verify.yml](../.github/workflows/trace-verify.yml) | Trace Verify | `push` touching `scripts/build.sh`, `scripts/utils.sh`, `scripts/apkmirror_search.py` or `.github/traces/**` | `trace-verify` |
+| [trace-verify.yml](../.github/workflows/trace-verify.yml) | Trace Verify | `push` touching `scripts/build.sh`, `scripts/utils.sh`, `scripts/apkmirror_search.py`, `scripts/uptodown.py` or `.github/traces/**` | `trace-verify` |
 
 Nothing here runs on `push` to `main` except Trace Verify: a push changes
 behaviour for the *next* scheduled run, it does not start a build.
