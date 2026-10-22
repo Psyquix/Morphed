@@ -1,0 +1,17 @@
+{
+    "repo": {
+        "name": "Legacy Repo"
+    },
+    "packages": {
+        "com.example.legacy": [
+            {
+                "versionName": "1.5",
+                "versionCode": 15,
+                "apkName": "com.example.legacy_15.apk",
+                "nativecode": [
+                    "armeabi-v7a"
+                ]
+            }
+        ]
+    }
+}

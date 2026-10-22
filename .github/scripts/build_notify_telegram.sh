@@ -1,5 +1,12 @@
 #!/bin/bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=notify_targets.sh
+source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_pack.sh
+source "$SCRIPT_DIR/notify_pack.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 NL=$'\n'
 
 if [ -z "${TG_TOKEN:-}" ]; then
@@ -15,6 +22,14 @@ if [ ! -f "$BUILD_FILE" ]; then
   echo "Release notes file (build.md or build.tmp) not found"
   exit 1
 fi
+
+# The group post needs its topic (the chat is a forum - a threadless send would
+# land in General) and the broadcast channel is a second, separate target, so all
+# three are required before anything goes out.
+tg_require_targets \
+  "TG_CHAT_ID=${TG_CHAT_ID:-}" \
+  "TG_THREAD_ID=${TG_THREAD_ID:-}" \
+  "TG_CHAT_ID_BROADCAST=${TG_CHAT_ID_BROADCAST:-}" || exit 1
 
 BODY="$(sed \
   -e 's/&/&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' \
@@ -35,7 +50,9 @@ BODY="$(sed \
 TITLE_SUFFIX_ESC="$(echo "${TITLE_SUFFIX:-}" | sed 's/&/&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')"
 MSG="<b>Build No. $NEXT_VER_CODE</b>${TITLE_SUFFIX_ESC}${NL}${NL}${BODY}"
 
-# Split MSG into ≤4096-char chunks on line boundaries (never breaks URLs)
+# Split MSG into ≤4096-char messages on block boundaries (never a URL, and never
+# between an app's name line and its per-arch link lines) - see notify_pack.sh for why
+# packing whole lines is the wrong unit here.
 TG_LIMIT=4096
 CHUNK=""
 send_chunk() {
@@ -45,32 +62,27 @@ send_chunk() {
     --data-urlencode "parse_mode=HTML" \
     --data-urlencode "disable_web_page_preview=true" \
     --data-urlencode "text=${text}" \
-    --data-urlencode "chat_id=${TG_CHAT_ID:-@rvb27}" \
-    --data-urlencode "message_thread_id=${TG_THREAD_ID:-}" \
+    --data-urlencode "chat_id=${TG_CHAT_ID}" \
+    --data-urlencode "message_thread_id=${TG_THREAD_ID}" \
     "https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
   curl -s -X POST \
     --data-urlencode "parse_mode=HTML" \
     --data-urlencode "disable_web_page_preview=true" \
     --data-urlencode "text=${text}" \
-    --data-urlencode "chat_id=${TG_CHAT_ID_BROADCAST:-@rvb28}" \
+    --data-urlencode "chat_id=${TG_CHAT_ID_BROADCAST}" \
     "https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
 }
 
-while IFS= read -r LINE; do
-  # +1 for the newline we'll re-add between lines
-  CANDIDATE="${CHUNK:+${CHUNK}${NL}}${LINE}"
-  if [ "${#CANDIDATE}" -le "$TG_LIMIT" ]; then
-    CHUNK="$CANDIDATE"
-  else
-    # Flush current chunk and start a new one with this line
-    if [ -n "$CHUNK" ]; then
-      send_chunk "$CHUNK"
-    fi
-    CHUNK="$LINE"
+while IFS= read -r -d "$PACK_RS" CHUNK; do
+  # an if block, not `[ … ] && send_chunk`: a short-circuit that evaluates false is the
+  # last command of the body and would abort the step under set -e (repo rule 6)
+  if [ -n "$CHUNK" ]; then
+    send_chunk "$CHUNK"
   fi
-done <<< "$MSG"
+done < <(printf '%s' "$MSG" | pack_message "$TG_LIMIT" '^<b>.*</b>$')
 
-# Send any remaining content
-if [ -n "$CHUNK" ]; then
-  send_chunk "$CHUNK"
-fi
+# One mirror of the whole note, after the Telegram loop: that loop already posts each
+# chunk twice (group topic and broadcast channel), and Discord has one channel for the
+# release text, so it is handed the complete body and splits it by its own 2000-char
+# limit rather than reusing the Telegram chunks.
+discord_send "${DISCORD_WEBHOOK_BUILDER_LOG:-}" "$MSG" html

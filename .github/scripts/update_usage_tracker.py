@@ -54,8 +54,14 @@ def main():
     for version in used_versions:
         usage_data[version] = current_time
 
-    with open(usage_file, "w") as f:
-        json.dump(usage_data, f, indent=2)
+    with open(usage_file, "w", encoding="utf-8") as f:
+        # sort_keys must match cleanup-apks.py: both workflows rewrite this file and
+        # push to main, and a stable order keeps those commits to real changes only.
+        # Deliberately not jsonfmt.py: this document lives in the apks repo and its
+        # other writer is there, so the pair has to agree with each other, not with
+        # rvb's canonical form. Switching one side alone would flip the file's
+        # bytes back and forth on every run.
+        json.dump(usage_data, f, indent=2, sort_keys=True)
 
     os.chdir(clone_dir)
     

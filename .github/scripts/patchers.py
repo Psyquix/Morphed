@@ -10,7 +10,7 @@ Kinds: revanced | morphe | xposed | instafel | generic  (see patchers.sh).
 
 CLI:
     patchers.py kind <cli-source>            # print kind
-    patchers.py needs-bks <config.json>      # exit 0 if any enabled app needs BKS/BouncyCastle
+    patchers.py needs-bks <config.json>      # exit 0 if any enabled app needs BouncyCastle
     patchers.py bundle-globs <kind>          # print shell globs for patch bundles
 """
 import fnmatch
@@ -35,8 +35,11 @@ BUNDLE_GLOBS = {
 }
 
 # Needs BouncyCastle (BKS keystores) in the runner — matches patchers.sh
-# PATCHER_NEEDS_BKS (xposed flows only).
-NEEDS_BKS_KINDS = {"xposed"}
+# PATCHER_NEEDS_BKS. Within the xposed flow only NPatch qualifies: it calls
+# KeyStore.getInstance("BKS") before choosing a keystore and ships its built-in
+# keystores as BKS files, while JingMatrix LSPatch reads a bundled JKS through
+# KeyStore.getDefaultType() and needs no provider at all.
+NEEDS_BKS_SUBSTRINGS = ("npatch",)
 
 
 def classify(cli_source: str) -> str:
@@ -45,6 +48,12 @@ def classify(cli_source: str) -> str:
         if any(p in c for p in patterns):
             return kind
     return "generic"
+
+
+def needs_bks(cli_source: str) -> bool:
+    """Would patching with this tool hit a BKS keystore request?"""
+    c = (cli_source or "").lower()
+    return classify(c) == "xposed" and any(p in c for p in NEEDS_BKS_SUBSTRINGS)
 
 
 def ci_bundle_diffable(cli_sources) -> bool:
@@ -61,11 +70,22 @@ def ci_bundle_diffable(cli_sources) -> bool:
 def config_needs_bks(config_path: str) -> bool:
     with open(config_path, encoding="utf-8") as f:
         data = json.load(f)
+    # Keys written before the first table header are file-level defaults, and the
+    # engine inherits them into every table (build.sh DEF_CLI_SRC, then
+    # `toml_get "$t" cli-source`). yq renders them as top-level *scalar* entries
+    # sitting beside the tables, so a check that only reads a table's own
+    # cli-source sees an Xposed app as `generic` and skips the BouncyCastle
+    # install the app then dies on (`BKS not found`). Read the defaults here the
+    # same way the engine does.
+    defaults = {k: v for k, v in data.items() if not isinstance(v, dict)}
     for entry in data.values():
-        if not isinstance(entry, dict) or entry.get("enabled") is not True:
+        # A table with no `enabled` key is enabled: build.sh does
+        # `enabled=$(toml_get "$t" enabled) || enabled=true`. Only an explicit
+        # false skips the app.
+        if not isinstance(entry, dict) or entry.get("enabled") is False:
             continue
-        cli = entry.get("cli-source")
-        if isinstance(cli, str) and classify(cli) in NEEDS_BKS_KINDS:
+        cli = entry.get("cli-source", defaults.get("cli-source"))
+        if isinstance(cli, str) and needs_bks(cli):
             return True
     return False
 

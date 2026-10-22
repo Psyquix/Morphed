@@ -20,6 +20,10 @@ fi
 jq --version >/dev/null || abort "\`jq\` is not installed. install it with 'apt install jq' or equivalent"
 java --version >/dev/null || abort "\`java\` is not installed. install it with 'apt install openjdk-21-jre' or equivalent"
 zip --version >/dev/null || abort "\`zip\` is not installed. install it with 'apt install zip' or equivalent"
+# Before any download or patch work: every output is signed, and the signing
+# identity is no longer a file in this repository (the template's keystore private
+# key is public). Fail here rather than half-way through a pool.
+require_signing_identity || abort "cannot build without a signing identity (see 'Signing and identity' in docs/build-engine.md)"
 
 set_prebuilts
 
@@ -29,9 +33,25 @@ vtf() { if ! isoneof "${1}" "true" "false"; then abort "ERROR: '${1}' is not a v
 toml_prep "${1:-config.toml}" || abort "could not find config file '${1:-config.toml}'\n\tUsage: $0 <config.toml>"
 main_config_t=$(toml_get_table_main)
 COMPRESSION_LEVEL=$(toml_get "$main_config_t" compression-level) || COMPRESSION_LEVEL="9"
+# Duplicate-build suppression mode (CI-only, see check_duplicate_build in
+# utils.sh): "log" measures and publishes everything, "enforce" withholds an
+# unchanged rebuild from the release, "off" disables the check. Tuning knob by
+# ADR 0005: named ONLY by the build.yml job env, never by a config file. The
+# default is the non-destructive one, so a local build can never skip a release
+# by surprise, and the value must be read into the variable it exports — not
+# assigned over it (an assignment after a config-style read clobbered the
+# workflow's choice once already).
+RVB_DEDUP_MODE="${RVB_DEDUP_MODE:-log}"
+if ! isoneof "$RVB_DEDUP_MODE" off log enforce; then
+	abort "ERROR: RVB_DEDUP_MODE '$RVB_DEDUP_MODE' is not a valid option: only 'off', 'log' or 'enforce' are allowed"
+fi
+pr "RVB_DEDUP_MODE: $RVB_DEDUP_MODE"
 REMOVE_RV_INTEGRATIONS_CHECKS=$(toml_get "$main_config_t" remove-rv-integrations-checks) || REMOVE_RV_INTEGRATIONS_CHECKS="false"
 DEF_PATCHES_VER=$(toml_get "$main_config_t" patches-version) || DEF_PATCHES_VER="stable"
-[ "$DEF_PATCHES_VER" = "both" ] && { if [[ "${1:-}" == *"beta"* ]] || [[ "${1:-}" == *"dev"* ]]; then DEF_PATCHES_VER="beta"; else DEF_PATCHES_VER="stable"; fi; }
+# "both" means "whichever pool this config is for", and the only signal for that is
+# the file being built: the beta pool is configs/beta_build.json (a hand-written
+# config names itself with .beta.).
+[ "$DEF_PATCHES_VER" = "both" ] && { if [[ "${1:-}" == *"beta"* ]]; then DEF_PATCHES_VER="beta"; else DEF_PATCHES_VER="stable"; fi; }
 DEF_CLI_VER=$(toml_get "$main_config_t" cli-version) || DEF_CLI_VER="stable"
 DEF_PATCHES_SRC=$(toml_get "$main_config_t" patches-source) || DEF_PATCHES_SRC="MorpheApp/morphe-patches"
 DEF_PATCHES_SRC_HOST=$(toml_get "$main_config_t" patches-source-host) || DEF_PATCHES_SRC_HOST="github"
@@ -40,8 +60,10 @@ DEF_CLI_SRC_HOST=$(toml_get "$main_config_t" cli-source-host) || DEF_CLI_SRC_HOS
 DEF_BRAND=$(toml_get "$main_config_t" brand) || DEF_BRAND=""
 DEF_VARIANT=$(toml_get "$main_config_t" variant) || DEF_VARIANT=""
 DEF_SUB_VARIANT=$(toml_get "$main_config_t" sub-variant) || DEF_SUB_VARIANT=""
-[ -z "$DEF_SUB_VARIANT" ] && { DEF_SUB_VARIANT=$(toml_get "$main_config_t" sub_variant) || DEF_SUB_VARIANT=""; }
 DEF_DPI=$(toml_get "$main_config_t" dpi) || DEF_DPI="nodpi anydpi auto"
+# Download-format preference (see _pref_class_order in utils.sh). Unset asserts
+# nothing: every source keeps its own built-in variant order.
+DEF_PREFERRED_FORMAT=$(toml_get "$main_config_t" preferred-format) || DEF_PREFERRED_FORMAT=""
 DEF_ARCH=$(toml_get "$main_config_t" arch) || DEF_ARCH="both"
 DEF_BUILD_MODE=$(toml_get "$main_config_t" build-mode) || DEF_BUILD_MODE="apk"
 DEF_AUTHOR_NAME=$(toml_get "$main_config_t" author) || DEF_AUTHOR_NAME="nullcpy"
@@ -55,6 +77,64 @@ PAR_JOBS="${PARALLEL_JOBS:-1}"
 ((PAR_JOBS > 8)) && { wpr "capping parallel-jobs at 8 (runner is 4-core/16GB)"; PAR_JOBS=8; }
 pr "PARALLEL_JOBS: $PAR_JOBS"
 mkdir -p "$TEMP_DIR" "$BUILD_DIR"
+# Per-app failure records live here and MUST survive build.sh's end so the
+# post-build "Report build failures" CI step can read them; so this dir is
+# wiped only at START (a re-run begins clean), never by the closing sweep.
+FAILURES_DIR="$TEMP_DIR/failures"
+rm -rf "$FAILURES_DIR"
+mkdir -p "$FAILURES_DIR"
+# Same survival rule for the duplicate-build records: the no-change guard and
+# the hash-merge step in build.yml read them after the run, so they are wiped
+# at START only.
+UNCHANGED_DIR="$TEMP_DIR/unchanged"
+rm -rf "$UNCHANGED_DIR"
+mkdir -p "$UNCHANGED_DIR"
+RVB_UNCHANGED_DIR="$UNCHANGED_DIR"
+# Freshly computed fingerprints (channel/key/hash lines). pid-named because
+# every pooled child appends through the same exported path; merged into
+# state/build_content_hashes.json by CI only after the upload succeeded.
+rm -rf "$TEMP_DIR/hashes"
+mkdir -p "$TEMP_DIR/hashes"
+RVB_HASH_APPEND="$TEMP_DIR/hashes/append.$$.tsv"
+export RVB_DEDUP_MODE RVB_UNCHANGED_DIR RVB_HASH_APPEND
+
+# Attach the captured child log to a build-failure descriptor, keyed by the same
+# slug build_rv used. A bundle-unreadable abort (_lb) returned 1 before the plain
+# descriptor existed, so its log belongs to the <slug>_lb.json survivor; a hard
+# abort attaches to <slug>.log; otherwise no-op (clean skip, or a failure the
+# descriptor never recorded).
+_attach_failure_log() { # $1=label $2=log-file
+	local slug; slug=$(failure_slug "$1")
+	if [ -f "$FAILURES_DIR/${slug}_lb.json" ]; then
+		cp "$2" "$FAILURES_DIR/${slug}_lb.log" 2>/dev/null || true
+		return 0
+	fi
+	[ -f "$FAILURES_DIR/$slug.json" ] || return 0
+	cp "$2" "$FAILURES_DIR/$slug.log" 2>/dev/null || true
+}
+# Drop any stale failure record for a build that ultimately returned clean.
+# Also removes the serial-mode tee log (same <slug>.log basename). A patcher
+# abort ALSO returns clean (build_rv's fail-soft skip) but leaves a <slug>_pf.json
+# survivor alongside the <slug>.json descriptor the version-resolution point
+# already wrote; that pair always reflects THIS child (temp/failures is wiped at
+# build.sh START, and a slug is built once per run). When <slug>_pf.json is present,
+# relocate the captured log onto <slug>_pf.log BEFORE the sweep deletes the plain
+# names — the abort reason lives only in that log, and the plain descriptor must
+# still go so the build is reported once, from the _pf record. $1 names the log
+# source: absent uses the serial tee log (<slug>.log, same dir); a path (the pooled
+# child's queue log) is moved when there is no plain tee log.
+_clear_failure_record() { # $1=label [$2=pf-log-source]
+	local slug _src="${2:-}"
+	slug=$(failure_slug "$1")
+	if [ -f "$FAILURES_DIR/${slug}_pf.json" ]; then
+		if [ -f "$FAILURES_DIR/$slug.log" ]; then
+			mv -f "$FAILURES_DIR/$slug.log" "$FAILURES_DIR/${slug}_pf.log" 2>/dev/null || true
+		elif [ -n "$_src" ] && [ -f "$_src" ]; then
+			mv -f "$_src" "$FAILURES_DIR/${slug}_pf.log" 2>/dev/null || true
+		fi
+	fi
+	rm -f "$FAILURES_DIR/$slug.json" "$FAILURES_DIR/$slug.log" 2>/dev/null || true
+}
 
 : >build.md
 ENABLE_MODULE_UPDATE=$(toml_get "$main_config_t" enable-module-update) || ENABLE_MODULE_UPDATE=true
@@ -103,7 +183,15 @@ if ((PAR_JOBS > 1)); then
 			if [ -n "${GITHUB_REPOSITORY:-}" ]; then echo "::group::Building ${JOB_LABEL[$id]}"; fi
 			cat "${JOB_LOG[$id]}" 2>/dev/null
 			if [ -n "${GITHUB_REPOSITORY:-}" ]; then echo "::endgroup::"; fi
-			[ "$rc" = 0 ] || epr "Build failed for ${JOB_LABEL[$id]} (exit $rc)"
+			if [ "$rc" = 0 ]; then
+				# second arg: this child's queue log, relocated onto <slug>_pf.log
+				# when the child recorded a patcher abort (the plain descriptor
+				# would otherwise take it to the sweep as a "clean" return).
+				_clear_failure_record "${JOB_LABEL[$id]}" "${JOB_LOG[$id]}"
+			else
+				epr "Build failed for ${JOB_LABEL[$id]} (exit $rc)"
+				_attach_failure_log "${JOB_LABEL[$id]}" "${JOB_LOG[$id]}"
+			fi
 			rm -f "${JOB_LOG[$id]}" "${JOB_RC[$id]}"
 			unset "JOB_PID[$id]" "JOB_LABEL[$id]" "JOB_LOG[$id]" "JOB_RC[$id]"
 		done
@@ -151,8 +239,17 @@ fi
 # emitted by _reap_done from the captured log).
 _run_build() { # $1=label $2=declare-p app_args
 	if ((PAR_JOBS <= 1)); then
+		local _slug _log
+		_slug=$(failure_slug "$1")
+		_log="$FAILURES_DIR/$_slug.log"
 		if [ -n "${GITHUB_REPOSITORY:-}" ]; then echo "::group::Building $1"; fi
-		build_rv "$2" || epr "Build failed for $1"
+		# Tee so a serial failure still has a per-app log to upload; trimmed on success.
+		if build_rv "$2" 2>&1 | tee "$_log"; then
+			_clear_failure_record "$1"
+		else
+			epr "Build failed for $1"
+			_attach_failure_log "$1" "$_log"
+		fi
 		if [ -n "${GITHUB_REPOSITORY:-}" ]; then echo "::endgroup::"; fi
 	else
 		_enqueue_build "$2" "$1"
@@ -171,11 +268,20 @@ for table_name in $(toml_get_table_names); do
 	patches_src=$(toml_get "$t" patches-source) || patches_src=$DEF_PATCHES_SRC
 	patches_src_host=$(toml_get "$t" patches-source-host) || patches_src_host=$DEF_PATCHES_SRC_HOST
 	patches_ver=$(toml_get "$t" patches-version) || patches_ver=$DEF_PATCHES_VER
-	[ "$patches_ver" = "both" ] && { if [[ "${1:-}" == *"beta"* ]] || [[ "${1:-}" == *"dev"* ]] || [ "$DEF_PATCHES_VER" = "beta" ] || [ "$DEF_PATCHES_VER" = "dev" ]; then patches_ver="beta"; else patches_ver="stable"; fi; }
+	# "both" is not a channel — it is routing, resolved here from the config being
+	# built: a beta-named file, or a file-level default already set to beta.
+	[ "$patches_ver" = "both" ] && { if [[ "${1:-}" == *"beta"* ]] || [ "$DEF_PATCHES_VER" = "beta" ]; then patches_ver="beta"; else patches_ver="stable"; fi; }
+	# The dedup namespace check_duplicate_build reads from args: the channel this
+	# pool file is built for, resolved once here from the same signals the
+	# module-id -beta suffix uses — never inferred per app inside the child.
+	dup_channel=stable
+	if [[ "${1:-}" == *"beta"* ]] || [ "$DEF_PATCHES_VER" = "beta" ] || [ "$patches_ver" = "beta" ]; then
+		dup_channel=beta
+	fi
 	cli_src=$(toml_get "$t" cli-source) || cli_src=$DEF_CLI_SRC
 	cli_src_host=$(toml_get "$t" cli-source-host) || cli_src_host=$DEF_CLI_SRC_HOST
 	cli_ver=$(toml_get "$t" cli-version) || cli_ver=$DEF_CLI_VER
-	if ! isoneof "$cli_src_host" github gitlab; then abort "ERROR: cli-source-host '$cli_src_host' is not a valid option for '$table_name': only 'github' or 'gitlab' is allowed"; fi
+	if ! isoneof "$cli_src_host" github gitlab codeberg; then abort "ERROR: cli-source-host '$cli_src_host' is not a valid option for '$table_name': only 'github', 'gitlab' or 'codeberg' is allowed"; fi
 	resolve_patcher "$cli_src"
 
 	# Parse patch sources: may be a single string or multiline (quoted list)
@@ -185,14 +291,21 @@ for table_name in $(toml_get_table_names); do
 	p_vers=($(list_args "$patches_ver" | tr -d \"\')); [ ${#p_vers[@]} -eq 0 ] && p_vers=("$patches_ver")
 	unset IFS
 	for h in "${p_hosts[@]}"; do
-		if ! isoneof "$h" github gitlab; then abort "ERROR: patches-source-host '$h' is not a valid option for '$table_name': only 'github' or 'gitlab' is allowed"; fi
+		if ! isoneof "$h" github gitlab codeberg; then abort "ERROR: patches-source-host '$h' is not a valid option for '$table_name': only 'github', 'gitlab' or 'codeberg' is allowed"; fi
 	done
 
-	if ! PREBUILTS="$(get_prebuilts "$cli_src_host" "$cli_src" "$cli_ver" "$patches_src_host" "$patches_src" "$patches_ver")"; then
+	# NOTE: called directly, not via $(...), so the __PREBUILTS_CACHE__ write in
+	# get_prebuilts survives in this shell (see get_prebuilts in utils.sh).
+	if ! get_prebuilts "$cli_src_host" "$cli_src" "$cli_ver" "$patches_src_host" "$patches_src" "$patches_ver"; then
 		epr "Could not get prebuilts"
 		continue
 	fi
-	read -r cli_jar patches_jar_all <<< "$PREBUILTS"
+	read -r -a __pb <<< "$__PREBUILTS_RESULT"
+	cli_jar=${__pb[0]}
+	patches_jar_all="${__pb[*]:1}"
+	# Resolved patch bundles, index-aligned with p_srcs (both derive from the same
+	# patches_src string via list_args), so metadata can name the exact file used.
+	__pb_patches=("${__pb[@]:1}")
 	app_args[cli]=$cli_jar
 	app_args[ptjar]=$patches_jar_all
 	app_args[cli_source]=$cli_src
@@ -203,17 +316,17 @@ for table_name in $(toml_get_table_names); do
 	for i in "${!p_srcs[@]}"; do
 		psrc="${p_srcs[$i]}"
 		phost="${p_hosts[$i]:-${p_hosts[0]}}"
-		# Find the downloaded bundle for this source to get actual version
-		pdir=${psrc%/*}; pdir=${TEMP_DIR}/${pdir,,}-rv
-		case "$PATCHER_FLOW" in
-			xposed-module) pfile=$(find "$pdir" -name '*.apk' 2>/dev/null | sort | tail -1) ;;
-			instafel-workflow) pfile=$(find "$pdir" -name 'ifl-patcher*.jar' 2>/dev/null | sort | tail -1) ;;
-			*) pfile=$(find "$pdir" \( -name 'patches-*.rvp' -o -name 'patches-*.jar' -o -name '*.mpp' \) 2>/dev/null | sort | tail -1) ;;
-		esac
+		# Use the exact bundle resolved for THIS build (index-aligned with p_srcs)
+		# instead of re-scanning the folder, which would report the highest-sorted
+		# version when several versions of the same repo coexist.
+		pfile="${__pb_patches[$i]:-}"
 		if [ -n "$pfile" ]; then
+			pdir=$(dirname "$pfile")
 			pfilename=${pfile##*/}
 			
-			if [ -f "${pdir}/tag_name.txt" ]; then
+			if [ -f "${pfile}.tag" ]; then
+				ptag=$(cat "${pfile}.tag")
+			elif [ -f "${pdir}/tag_name.txt" ]; then
 				ptag=$(cat "${pdir}/tag_name.txt")
 			else
 				pver_actual=${pfilename#*-}; pver_actual=${pver_actual%.*}
@@ -221,26 +334,38 @@ for table_name in $(toml_get_table_names); do
 			fi
 			
 			patches_ref_all+="${psrc%%/*}/${pfilename} "
-			if [ "$phost" = github ]; then
-				changelog_url_all+="https://github.com/${psrc}/releases/tag/${ptag} "
-			else
-				changelog_url_all+="https://gitlab.com/${psrc}/-/releases/${ptag} "
+			# One owner for the release-page shape (utils.sh). An unrecognised host
+			# contributes no link rather than a guessed one.
+			if cl_url=$(source_release_web_url "$phost" "$psrc" "$ptag"); then
+				changelog_url_all+="${cl_url} "
 			fi
 		fi
 	done
 	app_args[patches_src]=${p_srcs[0]}
+	app_args[dup_channel]="$dup_channel"
 	app_args[patches_ref]="${patches_ref_all% }"
 	app_args[changelog_url]="${changelog_url_all% }"
 	app_args[brand]=$(toml_get "$t" brand) || app_args[brand]="${DEF_BRAND:-${p_srcs[0]%%/*}}"
 	app_args[variant]=$(toml_get "$t" variant) || app_args[variant]="$DEF_VARIANT"
 	app_args[sub_variant]=$(toml_get "$t" sub-variant) || app_args[sub_variant]="$DEF_SUB_VARIANT"
-	[ -z "${app_args[sub_variant]}" ] && { app_args[sub_variant]=$(toml_get "$t" sub_variant) || app_args[sub_variant]="$DEF_SUB_VARIANT"; }
 
 	app_args[excluded_patches]=$(toml_get "$t" excluded-patches) || app_args[excluded_patches]=""
 	if [ -n "${app_args[excluded_patches]}" ] && [[ ${app_args[excluded_patches]} != *'"'* ]]; then abort "patch names inside excluded-patches must be quoted"; fi
 	app_args[included_patches]=$(toml_get "$t" included-patches) || app_args[included_patches]=""
 	if [ -n "${app_args[included_patches]}" ] && [[ ${app_args[included_patches]} != *'"'* ]]; then abort "patch names inside included-patches must be quoted"; fi
 	app_args[exclusive_patches]=$(toml_get "$t" exclusive-patches) || app_args[exclusive_patches]=false
+	# The mirror of exclusive-patches: true means "apply every patch this bundle
+	# offers for the app" instead of "apply only the listed ones". Boolean only - it
+	# does not take the patch-source form exclusive-patches accepts - and it cannot
+	# be combined with it. utils.sh expands it into explicit names at patch time.
+	# Placed right after exclusive-patches because the conflict check needs its value.
+	app_args[inclusive_patches]=$(toml_get "$t" inclusive-patches) || app_args[inclusive_patches]=false
+	if ! isoneof "${app_args[inclusive_patches]}" true false; then
+		abort "ERROR: inclusive-patches '${app_args[inclusive_patches]}' for '$table_name' must be true or false (unlike exclusive-patches it takes no patch-source list)"
+	fi
+	if [ "${app_args[inclusive_patches]}" = true ] && [ "${app_args[exclusive_patches]}" != false ]; then
+		abort "ERROR: inclusive-patches and exclusive-patches are opposites; set only one for '$table_name'"
+	fi
 	app_args[version]=$(toml_get "$t" version) || app_args[version]="auto"
 	app_args[version_code]=$(toml_get "$t" version-code) || app_args[version_code]=""
 	app_args[app_name]=$(toml_get "$t" app-name) || app_args[app_name]=$table_name
@@ -275,6 +400,14 @@ for table_name in $(toml_get_table_names); do
 	app_args[pkg_name]=$(toml_get "$t" pkg-name) || app_args[pkg_name]=""
 	app_args[patched_pkg_name]=$(toml_get "$t" patched-pkg-name) || app_args[patched_pkg_name]=""
 	app_args[dpi]=$(toml_get "$t" dpi) || app_args[dpi]="$DEF_DPI"
+	# Ordered format chain (space-delimited): a prefix of each source's variant order,
+	# never a filter. Validation lives in utils.sh (shared with its trace test) and
+	# writes the deduped, lowercased result to __PREF_CHAIN.
+	app_args[preferred_format]=$(toml_get "$t" preferred-format) || app_args[preferred_format]="$DEF_PREFERRED_FORMAT"
+	if [ -n "${app_args[preferred_format]}" ]; then
+		_pref_format_validate "${app_args[preferred_format]}" "$table_name"
+		app_args[preferred_format]="$__PREF_CHAIN"
+	fi
 	app_args[github_regex]=$(toml_get "$t" github-regex) || app_args[github_regex]=""
 	app_args[github_release_regex]=$(toml_get "$t" github-release-regex) || app_args[github_release_regex]=""
 	table_name_f=${table_name,,}
@@ -282,8 +415,9 @@ for table_name in $(toml_get_table_names); do
 	app_args[module_prop_name]=$(toml_get "$t" module-prop-name) || app_args[module_prop_name]="${table_name_f}-${DEF_AUTHOR_NAME}"
 
 	# Automatically append -beta to the module ID for pre-release builds
-	# so they have an independent update channel in Magisk
-	if { [[ "${1:-}" == *"beta"* ]] || [[ "${1:-}" == *"dev"* ]] || [ "${DEF_PATCHES_VER:-}" = "beta" ] || [ "${DEF_PATCHES_VER:-}" = "dev" ] || [ "${patches_ver:-}" = "beta" ] || [ "${patches_ver:-}" = "dev" ]; } && [[ "${app_args[module_prop_name]}" != *"-beta"* ]]; then
+	# so they have an independent update channel in Magisk. The channel value is
+	# only ever "stable" or "beta"; the glob is the beta pool's own filename.
+	if { [[ "${1:-}" == *"beta"* ]] || [ "${DEF_PATCHES_VER:-}" = "beta" ] || [ "${patches_ver:-}" = "beta" ]; } && [[ "${app_args[module_prop_name]}" != *"-beta"* ]]; then
 		app_args[module_prop_name]="${app_args[module_prop_name]}-beta"
 	fi
 
@@ -316,8 +450,19 @@ while ((PAR_JOBS > 1 && ${#JOB_PID[@]} > 0)); do
 	sleep 1
 done
 merge_build_info
-rm -rf temp/tmp.* "$TEMP_DIR"/*-merge-tmp* "$TEMP_DIR"/*/*-merge-tmp* "$QUEUE_DIR" "$TEMP_DIR/dllocks" "$TEMP_DIR/apkslocks" "$TEMP_DIR"/morphe-stage-*
-if [ -z "$(ls -A1 "${BUILD_DIR}")" ]; then abort "All builds failed."; fi
+rm -rf temp/tmp.* "$TEMP_DIR"/*-merge-tmp* "$TEMP_DIR"/*/*-merge-tmp* "$QUEUE_DIR" "$TEMP_DIR/dllocks" "$TEMP_DIR/apkslocks" "$TEMP_DIR/urlindex" "${TEMP_DIR}"/morphe-stage-*
+if [ -z "$(ls -A1 "${BUILD_DIR}")" ]; then
+	# An empty build dir with unchanged records is not a failed run: every
+	# artifact this pool produced was identical to what is already published.
+	# The marker (not a build number) is what build.yml's no-change guard
+	# reads to skip the whole publish chain — never create an empty release.
+	if [ -n "$(ls -A1 "$UNCHANGED_DIR" 2>/dev/null)" ]; then
+		pr "No new artifacts — every build identical to published; nothing to release."
+		: >"$UNCHANGED_DIR/all.txt"
+		exit 0
+	fi
+	abort "All builds failed."
+fi
 
 if command -v python3 >/dev/null 2>&1; then
 	python3 .github/scripts/generate_release_notes.py

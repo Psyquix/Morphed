@@ -10,69 +10,52 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    strategy:
-      matrix:
-        branch: [main, update]
     steps:
-      - name: Checkout ${{ matrix.branch }}
+      - name: Checkout main
         uses: actions/checkout@v7
         with:
-          ref: ${{ matrix.branch }}
+          ref: main
           fetch-depth: 0
 
-      - name: Merge upstream, keeping our patch configs
+      - name: Merge upstream/main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          BRANCH="${{ matrix.branch }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          PROTECTED=(
-            .github/configs/patches
-            .github/configs/config.manual.toml
-            .github/configs/config.stable.updated.json
-            .github/configs/config.beta.updated.json
-            .github/configs/patch_sources.json
-            .github/configs/patch_file_hashes.json
-            README.md
-            .github/scripts/generate_release_notes.py
-            .github/workflows/sync-upstream.yml
-            scripts
-          )
+          # Fork-specific files that must never be replaced by upstream.
+          PROTECTED=(README.md .github/scripts/generate_release_notes.py .github/workflows/sync-upstream.yml)
           if git remote get-url upstream >/dev/null 2>&1; then
             git remote set-url upstream "https://github.com/nullcpy/rvb.git"
           else
             git remote add upstream "https://github.com/nullcpy/rvb.git"
           fi
-          git fetch upstream "$BRANCH"
-          if git merge-base --is-ancestor "upstream/$BRANCH" HEAD; then
-            echo "Already in sync with upstream/$BRANCH."
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already in sync with upstream/main."
             exit 0
           fi
-          git merge --no-commit --no-ff "upstream/$BRANCH" || true
-          # --- Protected paths: always keep OUR version ---
-          # 1. Restore files we still track to our pre-merge state:
-          git checkout HEAD -- "${PROTECTED[@]}" || true
-          # 2. Drop files upstream added under protected paths
-          #    (skip unmerged ones and paths already absent;
-          #    -f is needed because merge-staged additions resist plain rm):
-          UNMERGED="$(git diff --name-only --diff-filter=U || true)"
-          comm -13 \
-            <(git ls-tree -r --name-only HEAD -- "${PROTECTED[@]}" | sort) \
-            <(git ls-tree -r --name-only MERGE_HEAD -- "${PROTECTED[@]}" | sort) \
-            | while IFS= read -r f; do
-                [ -n "$f" ] || continue
-                if printf '%s\n' "$UNMERGED" | grep -qxF "$f"; then continue; fi
-                if [ -e "$f" ] || git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
-                  git rm -q -f -- "$f"
-                fi
-              done || true
-          # 3. Resolve remaining conflicts on protected paths with OUR side
-          #    (tracked file -> keep ours, file we deleted -> stay deleted):
+          if ! git merge --no-commit --no-ff upstream/main; then
+            echo "Merge produced conflicts; protected paths will keep ours."
+          fi
+          if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            echo "::error::Upstream merge did not start; refusing to continue."
+            exit 1
+          fi
+          # Keep fork-specific files exactly as they were before the merge.
+          for f in "${PROTECTED[@]}"; do
+            if git cat-file -e "HEAD:$f" 2>/dev/null; then
+              git checkout HEAD -- "$f" || true
+            else
+              git rm -q -f -- "$f" || true
+            fi
+          done
+          # Any remaining conflict on a protected path is ours; anything else
+          # needs a human, because we never want to guess at upstream code.
           for f in $(git diff --name-only --diff-filter=U || true); do
             case "$f" in
-              .github/configs/patches/*|.github/configs/config.manual.toml|.github/configs/config.*.updated.json|.github/configs/patch_*.json|README.md|.github/scripts/generate_release_notes.py|.github/workflows/sync-upstream.yml|scripts/*)
+              README.md|.github/scripts/generate_release_notes.py|.github/workflows/sync-upstream.yml)
                 if git cat-file -e "HEAD:$f" 2>/dev/null; then
                   git checkout --ours -- "$f"
                 else
@@ -81,7 +64,6 @@ jobs:
                 ;;
             esac
           done
-          # Conflicts anywhere else need a human:
           if [ -n "$(git diff --name-only --diff-filter=U || true)" ]; then
             echo "Unresolved conflicts outside protected paths:"
             git diff --name-only --diff-filter=U || true
@@ -89,9 +71,9 @@ jobs:
           fi
           git add -A
           if [ -z "$(git status --porcelain)" ]; then
-            echo "Nothing to merge after keeping our configs."
-            git merge --abort
+            echo "Nothing to merge after keeping fork files."
+            git merge --abort || true
             exit 0
           fi
-          git commit -m "Sync upstream/$BRANCH (keeping local patch configs)"
-          git push origin "HEAD:$BRANCH"
+          git commit -m "Sync upstream/main (keeping fork README and release notes)"
+          git push origin HEAD:main

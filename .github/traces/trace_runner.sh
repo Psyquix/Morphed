@@ -33,6 +33,11 @@ export GITHUB_REPOSITORY=""
 # utils.sh is sourced via process substitution, so its own BASH_SOURCE path
 # lookup for the patcher registry can't work; point it explicitly.
 export RVB_PATCHERS_SH="$RVB_ROOT/.github/scripts/patchers.sh"
+# The goldens record the LIVE release-listing path, so the state-snapshot lookup
+# must be off deliberately rather than by accident of cwd: on a real build job the
+# data checkout does put state/patch_sources.json in reach, and a developer copy
+# would make the traces machine-dependent without this.
+export RVB_PATCH_SOURCES_JSON="${RVB_PATCH_SOURCES_JSON:-$RUN_ROOT/no-state-snapshot.json}"
 # normally set by build.sh before get_prebuilts; harness defaults to the common config
 export REMOVE_RV_INTEGRATIONS_CHECKS="${REMOVE_RV_INTEGRATIONS_CHECKS:-false}"
 
@@ -58,19 +63,35 @@ for fx in "${FIXTURES[@]}"; do
 		export HOME="$run_dir"
 		: > "$TRACE_OUT"
 		printf 'FAKE-STOCK\n' > "$run_dir/stock.apk"
+		# Signing identity: the engine refuses to build without one now (there is no
+		# committed keystore to fall back on), so the harness provides a fixed fake.
+		# These values are recorded in the goldens - keep them stable and obviously
+		# not a real key, and alphanumeric because the engine rejects a password it
+		# has to embed in an eval'd command line.
+		export RVB_KEYSTORE=trace-ks.keystore RVB_KEYSTORE_P12=trace-ks-p12.keystore
+		export RVB_KEYSTORE_PASS=tracepass RVB_KEY_ALIAS=tracealias
+		printf 'FAKE-KEYSTORE-BKS\n' > trace-ks.keystore
+		printf 'FAKE-KEYSTORE-PKCS12\n' > trace-ks-p12.keystore
 
 		echo "=== FIXTURE: $name ==="
 		toml_prep "$fx" || { echo "RESULT: toml_prep failed"; exit 0; }
 		m=$(toml_get_table_main)
 		cli_src=$(toml_get "$m" cli-source) || cli_src="MorpheApp/morphe-desktop"
+		cli_host=$(toml_get "$m" cli-source-host) || cli_host="github"
 		cli_ver=$(toml_get "$m" cli-version) || cli_ver="stable"
 		pt_src=$(toml_get "$m" patches-source) || pt_src="MorpheApp/morphe-patches"
+		pt_host=$(toml_get "$m" patches-source-host) || pt_host="github"
 		pt_ver=$(toml_get "$m" patches-version) || pt_ver="stable"
 
-		# resolve prebuilts through the real path (stubbed network)
-		PREBUILTS=$(get_prebuilts github "$cli_src" "$cli_ver" github "$pt_src" "$pt_ver") \
+		# resolve prebuilts through the real path (stubbed network). Mirrors how
+		# build.sh calls get_prebuilts now: invoked directly (NOT via $(...)) so the
+		# __PREBUILTS_CACHE__ write survives, and the result is read from the
+		# __PREBUILTS_RESULT global (get_prebuilts no longer echoes to stdout).
+		get_prebuilts "$cli_host" "$cli_src" "$cli_ver" "$pt_host" "$pt_src" "$pt_ver" \
 			|| { echo "RESULT: get_prebuilts failed"; exit 0; }
-		read -r cli_jar patches_jar_all <<< "$PREBUILTS"
+		read -r -a __pb <<< "$__PREBUILTS_RESULT"
+		cli_jar=${__pb[0]}
+		patches_jar_all="${__pb[*]:1}"
 		echo "PREBUILT CLI: $cli_jar"
 		echo "PREBUILT BUNDLES: $patches_jar_all"
 
@@ -93,6 +114,44 @@ for fx in "${FIXTURES[@]}"; do
 			pargs=$(toml_get "$t" patcher-args) || pargs=""
 			inc=$(toml_get "$t" included-patches) || inc=""
 			exc=$(toml_get "$t" excluded-patches) || exc=""
+
+			# The included-patches path: which versions the named patches declare, whether
+			# the gate accepts them while the CLI's own default-set listing says nothing,
+			# and what each build arch's verdict is. Only emitted for configs that name
+			# patches, so the other goldens stay byte-identical. Every call here is made
+			# DIRECTLY (never through $( )) because the engine's memo tables are written
+			# by the caller's process: a subshell would re-run the JVM for each marker and
+			# the ARGS lines would record harness noise instead of build_rv's real calls.
+			if [ -n "$inc" ]; then
+				_eff=""
+				_eff_rc=0
+				_eff_file="$run_dir/eff_versions.txt"
+				_effective_patch_versions "$cli_jar" "$patches_jar_all" "$pkg" "$cli_src" named "$inc" \
+					> "$_eff_file" 2> /dev/null || _eff_rc=$?
+				_eff=$(cat "$_eff_file" 2> /dev/null)
+				echo "EFFECTIVE_PATCH_VERSIONS(named): rc=$_eff_rc"
+				printf '%s\n' "$_eff" | sed -e '/^[[:space:]]*$/d' -e 's/^/  /'
+				_v=$(printf '%s\n' "$_eff" | cut -f1 | grep -v '^Any$' | head -1)
+				if [ -n "$_v" ]; then
+					_has_rc=0
+					has_compatible_patches "$cli_jar" "$patches_jar_all" "$pkg" "$_v" "$cli_src" "$inc" \
+						> /dev/null 2>&1 || _has_rc=$?
+					echo "HAS_COMPATIBLE_PATCHES(named,hit): rc=$_has_rc"
+					for _a in arm64-v8a arm-v7a; do
+						_pin_rc=0
+						_pin=$(_effective_arch_verdict "$_eff" "$_v" "$_a") || _pin_rc=$?
+						if [ "$_pin_rc" != 0 ]; then
+							echo "  ARCH_VERDICT($_v,$_a): refused"
+						else
+							echo "  ARCH_VERDICT($_v,$_a): pin=${_pin:-none}"
+						fi
+					done
+				fi
+				_has_rc=0
+				has_compatible_patches "$cli_jar" "$patches_jar_all" "$pkg" "9.9.9" "$cli_src" "$inc" \
+					> /dev/null 2>&1 || _has_rc=$?
+				echo "HAS_COMPATIBLE_PATCHES(named,miss): rc=$_has_rc"
+			fi
 			# Emulate build_rv's per-bundle ed string with the engine's own
 			# helpers (utils.sh join_args/list_args), bundles joined by '|'.
 			per_bundle_ed=""

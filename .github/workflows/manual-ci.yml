@@ -7,16 +7,21 @@ on:
         description: "Select the config file to use"
         required: true
         type: choice
-        default: ".github/configs/config.manual.toml"
+        default: "configs/config.manual.toml"
         options:
-          - ".github/configs/config.manual.toml"
-          - ".github/configs/config.beta.updated.json"
-          - ".github/configs/config.stable.updated.json"
+          - "configs/config.manual.toml"
+          - "configs/beta_build.json"
+          - "configs/stable_build.json"
       remove_apks:
         description: "Optional: APKs to remove from cache (space-separated, e.g., com.brave.browser-1.93.138-*.apk)"
         required: false
         type: string
         default: ""
+      disable_dedup:
+        description: "Don't suppress duplicate builds: run dedup in log mode (report matches, still publish everything)"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ci
@@ -28,6 +33,7 @@ jobs:
     with:
       config_file: ${{ inputs.config_file }}
       remove_apks: ${{ inputs.remove_apks }}
+      disable_dedup: ${{ inputs.disable_dedup }}
     secrets: inherit
 
   trigger_cleanup:
@@ -42,4 +48,5 @@ jobs:
     uses: ./.github/workflows/notify.yml
     with:
       workflow_name: "Manual CI"
+      already_reported: ${{ needs.build_manual.outputs.reported_failures == 'true' }}
     secrets: inherit

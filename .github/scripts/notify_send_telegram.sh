@@ -1,62 +1,52 @@
 #!/bin/bash
+# notify_send_telegram.sh — the IMMEDIATE notify path: a workflow-failure alert
+# raised through workflow_call. Issue/PR events no longer route here — they are
+# enqueued and sent in a debounced batch (see notify_enqueue.sh / notify_drain.sh),
+# which is why this script only handles the WF_NAME branch.
+#
+# Route B: a workflow-failure alert is skipped when ALREADY_REPORTED=true (the
+# detailed per-app build report already covered that run).
+#
+# Env: TG_TOKEN TG_CHAT_ID TG_THREAD_ID WF_NAME ALREADY_REPORTED + render inputs.
+#      DISCORD_WEBHOOK_GITHUB_LOG (optional mirror, see notify_discord.sh)
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=notify_render.sh
+source "$SCRIPT_DIR/notify_render.sh"
+# shellcheck source=notify_targets.sh
+source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 
 if [ -z "${TG_TOKEN:-}" ]; then
-  echo "TG_TOKEN is not set. Skipping Telegram notification."
-  exit 0
+	echo "TG_TOKEN is not set. Skipping Telegram notification."
+	exit 0
 fi
 
-# Escape special HTML characters in dynamic/user-generated content
-esc() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
-
-ACTOR_URL="https://github.com/${ACTOR}"
-REPO_NAME="${REPO#*/}"
-REPO_URL="https://github.com/${REPO}"
-ACTION_CAP="${ACTION^}"
-NL=$'\n'
-
-if [ -n "$WF_NAME" ]; then
-  WF_URL="${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}"
-  RUN_NUM="${GITHUB_RUN_NUMBER}"
-  BRANCH="$(esc "${REF_NAME}")"
-  ACTOR_ESC="$(esc "${ACTOR}")"
-  REPO_ESC="$(esc "${REPO_NAME}")"
-
-  MSG="🔴 <a href=\"${WF_URL}\">$(esc "${WF_NAME}") #${RUN_NUM}</a> failed in <a href=\"${REPO_URL}\">${REPO_ESC}</a>${NL}${NL}"
-  MSG+="🌿 Branch: <code>${BRANCH}</code> • triggered by <a href=\"${ACTOR_URL}\">${ACTOR_ESC}</a>${NL}${NL}"
-  MSG+="🔗 <a href=\"${WF_URL}\">View run</a>"
-
-elif [ "$EVENT_NAME" = "pull_request" ]; then
-  TITLE="$(esc "${PR_TITLE}")"
-  BASE="$(esc "${PR_BASE_REF}")"
-  HEAD="$(esc "${PR_HEAD_REF}")"
-  ACTOR_ESC="$(esc "${ACTOR}")"
-  REPO_ESC="$(esc "${REPO_NAME}")"
-
-  if [ "$ACTION" = "opened" ]; then PR_ICON="🟢"; elif [ "$ACTION" = "closed" ]; then PR_ICON="🔴"; else PR_ICON="🟡"; fi
-  COMMIT_STR="commits"; if [ "$PR_COMMITS" = "1" ]; then COMMIT_STR="commit"; fi
-
-  MSG="${PR_ICON} <a href=\"${PR_URL}\">Pull request #${PR_NUM}</a> ${ACTION} by <a href=\"${ACTOR_URL}\">${ACTOR_ESC}</a> in <a href=\"${REPO_URL}\">${REPO_ESC}</a>${NL}${NL}"
-  MSG+="📝 <b>${TITLE}</b>${NL}${NL}"
-  MSG+="📑 <code>${HEAD}</code> → <code>${BASE}</code> • ${PR_COMMITS} ${COMMIT_STR} • ${PR_FILES} files • +${PR_ADD}/-${PR_DEL}${NL}${NL}"
-  MSG+="🔗 <a href=\"${PR_URL}\">View pull request</a>"
-
-else
-  TITLE="$(esc "${ISSUE_TITLE}")"
-  ACTOR_ESC="$(esc "${ACTOR}")"
-  REPO_ESC="$(esc "${REPO_NAME}")"
-
-  if [ "$ACTION" = "closed" ]; then ISSUE_ICON="✅"; elif [ "$ACTION" = "reopened" ]; then ISSUE_ICON="🔄"; else ISSUE_ICON="🐛"; fi
-
-  MSG="${ISSUE_ICON} <a href=\"${ISSUE_URL}\">Issue #${ISSUE_NUM}</a> ${ACTION} by <a href=\"${ACTOR_URL}\">${ACTOR_ESC}</a> in <a href=\"${REPO_URL}\">${REPO_ESC}</a>${NL}${NL}"
-  MSG+="📝 <b>${TITLE}</b>${NL}${NL}"
-  MSG+="🔗 <a href=\"${ISSUE_URL}\">View issue</a>"
+# Route B — the build step already reported this failure in detail.
+if [ -n "${WF_NAME:-}" ] && [ "${ALREADY_REPORTED:-}" = "true" ]; then
+	echo "Detailed failure report already sent; skipping generic alert."
+	exit 0
 fi
+
+# The target is named by repo variables and nothing else: an unset chat or topic
+# fails this step instead of posting to a handle hardcoded in the workflow (see
+# notify_targets.sh).
+tg_require_targets \
+	"TG_CHAT_ID=${TG_CHAT_ID:-}" \
+	"TG_THREAD_ID=${TG_THREAD_ID:-}" || exit 1
+
+MSG="$(render_message)"
 
 curl -s -X POST \
-  --data-urlencode "parse_mode=HTML" \
-  --data-urlencode "disable_web_page_preview=true" \
-  --data-urlencode "text=${MSG}" \
-  --data-urlencode "chat_id=${TG_CHAT_ID}" \
-  --data-urlencode "message_thread_id=${TG_THREAD_ID}" \
-  "https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
+	--data-urlencode "parse_mode=HTML" \
+	--data-urlencode "disable_web_page_preview=true" \
+	--data-urlencode "text=${MSG}" \
+	--data-urlencode "chat_id=${TG_CHAT_ID}" \
+	--data-urlencode "message_thread_id=${TG_THREAD_ID}" \
+	"https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
+
+# Mirror last: the generic alert is the least important message in the system and a
+# copy of it must never be the reason the Telegram send is not reported. html because
+# notify_render.sh writes HTML.
+discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG" html

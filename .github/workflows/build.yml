@@ -10,17 +10,24 @@ on:
         required: false
         type: string
         default: ""
+      disable_dedup:
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      reported_failures:
+        value: ${{ jobs.build.outputs.reported_failures }}
   workflow_dispatch:
     inputs:
       config_file:
         description: "Select the config file to use"
         required: true
         type: choice
-        default: ".github/configs/config.manual.toml"
+        default: "configs/config.manual.toml"
         options:
-          - ".github/configs/config.manual.toml"
-          - ".github/configs/config.beta.updated.json"
-          - ".github/configs/config.stable.updated.json"
+          - "configs/config.manual.toml"
+          - "configs/beta_build.json"
+          - "configs/stable_build.json"
       remove_apks:
         description: "Optional: APKs to remove from cache (space-separated, e.g., com.brave.browser-1.93.138-*.apk)"
         required: false
@@ -33,6 +40,8 @@ concurrency:
 
 jobs:
   build:
+    outputs:
+      reported_failures: ${{ steps.failure_report.outputs.reported_failures }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -42,9 +51,19 @@ jobs:
     env:
       # How many app builds run at the same time. 1 = one at a time (normal).
       # Set to 2-4 to speed up builds (runner has 4 cores).
-      PARALLEL_JOBS: "4"
+      PARALLEL_JOBS: "6"
       # How many files upload at the same time.
-      UPLOAD_CONCURRENCY: "8"
+      UPLOAD_CONCURRENCY: "12"
+      # Duplicate-build suppression: log measures and still publishes every
+      # artifact; enforce withholds an unchanged rebuild from the release and
+      # lets an all-unchanged run skip the publish chain (never an empty
+      # release - see docs/ci-pipelines.md). Flipped to enforce after the
+      # 1388-1391 log runs: one true duplicate detected (proton-mail), zero
+      # false matches, zero hash-unavailable warnings, state fully backed by
+      # live release assets. Manual CI can demote it to `log` for one run
+      # (checkbox `disable_dedup`): a match is still reported but nothing is
+      # withheld, so an app the hash says is unchanged gets published anyway.
+      RVB_DEDUP_MODE: ${{ inputs.disable_dedup && 'log' || 'enforce' }}
     services:
       cf_solver:
         image: ghcr.io/sarperavci/cloudflarebypassforscraping:latest
@@ -63,6 +82,11 @@ jobs:
           ref: main
           fetch-depth: 0
           submodules: true
+
+      - name: Fetch configs & state (data branch)
+        # Materializes configs/ (human TOMLs + generated *_build.json) and
+        # state/ (watcher JSONs) — the data branch is their canonical home.
+        run: bash .github/scripts/fetch_data_branch.sh
 
       - name: Resolve build context
         id: context
@@ -133,12 +157,59 @@ jobs:
           NEXT_VER_CODE: ${{ steps.version.outputs.NEXT_VER_CODE }}
           CF_SOLVER_URL: "http://localhost:8000"
           RVB_MORPHE_PASSTHROUGH: "${{ vars.RVB_MORPHE_PASSTHROUGH || 'true' }}"
-          RELEASE_NOTES_TG_LINK: "${{ vars.RELEASE_NOTES_TG_LINK || 'https://t.me/rvb27' }}"
-          RELEASE_NOTES_DONATE_LINK: "${{ vars.RELEASE_NOTES_DONATE_LINK || 'https://fahim-ahmed05.github.io/donate' }}"
-          RELEASE_NOTES_WEBSITE_LINK: "${{ vars.RELEASE_NOTES_WEBSITE_LINK || 'https://nullcpy.github.io' }}"
+          RVB_MORPHE_STRIPLIBS: "${{ vars.RVB_MORPHE_STRIPLIBS || 'true' }}"
+          RVB_DEDUP_MODE: ${{ env.RVB_DEDUP_MODE }}
+          RELEASE_NOTES_DISCORD_LINK: ${{ vars.RELEASE_NOTES_DISCORD_LINK }}
+          RELEASE_NOTES_DONATE_LINK: ${{ vars.RELEASE_NOTES_DONATE_LINK }}
+          RELEASE_NOTES_WEBSITE_LINK: ${{ vars.RELEASE_NOTES_WEBSITE_LINK }}
         run: |
           set -euo pipefail
           bash scripts/build.sh "${{ steps.context.outputs.CONFIG_FILE }}"
+
+      - name: Report build failures
+        id: failure_report
+        if: always()
+        continue-on-error: true
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_NOTIFY: ${{ vars.TG_THREAD_NOTIFY }}
+          DISCORD_WEBHOOK_GITHUB_LOG: ${{ secrets.DISCORD_WEBHOOK_GITHUB_LOG }}
+          APKS_REPO: "${{ vars.APKS_REPO || 'nullcpy/apks' }}"
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: bash .github/scripts/build_report_failures.sh
+
+      # Reconcile the pending-build state (ADR 0010) from the same temp/failures
+      # records the report used: successes move into built_shape and clear their
+      # pending entry, failures re-queue as a retry (parked at the cap). Skipped on
+      # an explicit cancellation so a half-finished run cannot mark unattempted apps
+      # as built.
+      - name: Reconcile pending-build retry state
+        id: retry_state
+        if: ${{ !cancelled() }}
+        env:
+          CONFIG_FILE: ${{ steps.context.outputs.CONFIG_FILE }}
+          RVB_RETRY_MAX: "3"
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: bash .github/scripts/build_update_retry_list.sh
+
+      - name: Commit retry state to data branch
+        # Plumbing writer for state/built_shape.json + state/pending_builds.json.
+        # Separate from the artifact-hash commit below so neither gating changes; a
+        # failed push is non-fatal because the next run's fetch converges.
+        if: ${{ !cancelled() && steps.retry_state.outputs.RETRY_STATE_UPDATED == 'true' }}
+        run: |
+          DATA_COMMIT_MSG="chore: update pending-build retry state" \
+            bash .github/scripts/commit_data_branch.sh || \
+            echo "::warning::Could not push retry state to data (next run converges)"
+
+      - name: Check whether anything needs publishing
+        id: no_change
+        env:
+          RVB_DEDUP_MODE: ${{ env.RVB_DEDUP_MODE }}
+        run: bash .github/scripts/build_check_no_change.sh
 
       - name: Update Usage Tracker
         env:
@@ -165,27 +236,31 @@ jobs:
 
       - name: Get output
         id: get_output
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
         run: bash .github/scripts/build_get_output.sh
 
       - name: Generate release manifest
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
         env:
           NEXT_VER_CODE: ${{ steps.version.outputs.NEXT_VER_CODE }}
           IS_PRERELEASE: ${{ steps.context.outputs.IS_PRERELEASE }}
         run: python3 .github/scripts/build_make_manifest.py
 
       - name: Upload to release
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.version.outputs.NEXT_VER_CODE }}
           RELEASE_TITLE: "Build No. ${{ steps.version.outputs.NEXT_VER_CODE }}"
           RELEASE_BODY_FILE: build.md
           IS_PRERELEASE: ${{ steps.context.outputs.IS_PRERELEASE }}
-          UPLOAD_FILES: "./build/* ./temp/manifest/build.json"
+          UPLOAD_FILES: "./build/*"
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: bash .github/scripts/build_upload_release.sh
 
       - name: Update changelog and module update files
         id: update_changelog
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
         env:
           NEXT_VER_CODE: ${{ steps.version.outputs.NEXT_VER_CODE }}
           ARCHIVE_TAG: ${{ steps.context.outputs.ARCHIVE_TAG }}
@@ -194,45 +269,90 @@ jobs:
         run: bash .github/scripts/build_update_changelog.sh
 
       - name: Commit updated build and module update files
-        if: steps.update_changelog.outputs.has_modules == 'true'
-        uses: stefanzweifel/git-auto-commit-action@v7
-        with:
-          branch: update
-          skip_checkout: true
-          file_pattern: changelogs/*.md *-update.json
-          commit_message: Bump version ${{ steps.version.outputs.NEXT_VER_CODE }}
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true' && steps.update_changelog.outputs.has_modules == 'true'
+        # Explicit staging (the auto-commit action's default would sweep in
+        # unrelated dirt): pointers listed by build_update_changelog.sh plus
+        # this build's changelog. Branch already checked out by that script.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --pathspec-from-file=.updated_pointers
+          git add changelogs
+          if git diff --cached --quiet; then
+            echo "No update-branch changes to commit."
+          else
+            git commit -m "Bump version ${{ steps.version.outputs.NEXT_VER_CODE }}"
+            git push origin update
+          fi
 
       - name: Remove frequently updated apps
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
         run: |
           git checkout -f main
           bash .github/scripts/build_exclude_from_archive.sh
 
       - name: Upload to release (Archive)
         id: archive_upload
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.context.outputs.ARCHIVE_TAG }}
-          RELEASE_TITLE: ${{ steps.context.outputs.ARCHIVE_TAG }}
-          RELEASE_NOTES: "Archive release for ${{ steps.context.outputs.ARCHIVE_TAG }} builds"
+          # Assets only: no metadata field is named, so the archive releases keep
+          # the title, notes and pre-release badge written by hand while files are
+          # (re)uploaded with --clobber. Why: docs/decisions/0001-release-metadata-ownership.md
           RELEASE_TARGET: main
           UPLOAD_FILES: "./build/*"
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: bash .github/scripts/build_upload_release.sh
 
-      - name: Merge and upload archive manifest
+      - name: Merge archive manifest into website branch
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARCHIVE_TAG: ${{ steps.context.outputs.ARCHIVE_TAG }}
+          BUILD_TAG: ${{ steps.version.outputs.NEXT_VER_CODE }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: bash .github/scripts/merge_archive_manifest.sh
+        run: bash .github/scripts/merge_archive_branch.sh
+
+      - name: Merge published content hashes into state
+        id: merge_hashes
+        # Runs only when the upload chain got through: a fingerprint becomes
+        # authoritative precisely when its artifact is live. archive_upload is
+        # continue-on-error, so gate on its outcome too - a run whose assets
+        # never landed must not record hashes it did not publish.
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true' && steps.archive_upload.outcome != 'failure'
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash .github/scripts/build_merge_hashes.sh
+
+      - name: Commit artifact hashes to data branch
+        # Plumbing writer for state/build_content_hashes.json (and any other
+        # generated JSON this run legitimately touched). Runs only when the
+        # merge step actually changed the file. A failed data push is not
+        # fatal: the next run's fetch converges, the worst case is one
+        # redundant republish - never a wrong skip.
+        if: always() && steps.merge_hashes.outputs.STATE_UPDATED == 'true'
+        id: commit_hashes
+        run: |
+          DATA_COMMIT_MSG="chore: record artifact hashes for build ${{ steps.version.outputs.NEXT_VER_CODE }}" \
+            bash .github/scripts/commit_data_branch.sh || \
+            echo "::warning::Could not push artifact hashes to data (next run converges)"
 
       - name: Notify telegram
+        if: steps.no_change.outputs.HAS_NEW_FILES == 'true'
+        # Last step, after everything is published: a missing chat or topic is a
+        # configuration error, so the scripts name no fallback chat and fail loudly
+        # - but they must not mark a run that already released its files as failed.
+        continue-on-error: true
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: "${{ vars.TG_CHAT_ID || '@rvb27' }}"
-          TG_CHAT_ID_BROADCAST: "${{ vars.TG_CHAT_ID_BROADCAST || '@rvb28' }}"
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_CHAT_ID_BROADCAST: ${{ vars.TG_CHAT_ID_BROADCAST }}
           TG_THREAD_ID: ${{ steps.context.outputs.TG_THREAD_ID }}
+          # The release text has one Discord home (#builder-log) whatever Telegram
+          # topic and channel it also went to, so stable and beta land together.
+          DISCORD_WEBHOOK_BUILDER_LOG: ${{ secrets.DISCORD_WEBHOOK_BUILDER_LOG }}
           TITLE_SUFFIX: ${{ steps.context.outputs.TITLE_SUFFIX }}
           NEXT_VER_CODE: ${{ steps.version.outputs.NEXT_VER_CODE }}
           GITHUB_SERVER_URL: ${{ github.server_url }}

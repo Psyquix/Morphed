@@ -18,12 +18,12 @@ There exists an example below with all defaults shown and all the keys explicitl
 ```toml
 compression-level = 9                # module zip compression level
 remove-rv-integrations-checks = true # remove checks from the revanced integrations
-dpi = "320dpi nodpi"            # dpi packages to be searched in order. 'auto' matches whatever is available. default: "nodpi anydpi auto"
+dpi = "320dpi nodpi"            # apkmirror 'Screen DPI' values to accept; 'auto' also takes whatever else the release has. default: "nodpi anydpi auto"
 
 patches-source = "revanced/revanced-patches" # where to fetch patches bundle from. default: "MorpheApp/morphe-patches"
-patches-source-host = "github"               # source host for patches: "github" or "gitlab". default: "github"
+patches-source-host = "github"               # source host for patches: "github", "gitlab" or "codeberg". default: "github"
 cli-source = "ReVanced/revanced-cli"             # where to fetch cli from. default: "MorpheApp/morphe-desktop"
-cli-source-host = "github"                       # source host for cli: "github" or "gitlab". default: "github"
+cli-source-host = "github"                       # source host for cli: "github", "gitlab" or "codeberg". default: "github"
 # options like cli-source can also set per app
 brand = "Morphe"                     # patch brand/engine identity (e.g. "ReVanced Advanced", "Piko", "Morphe", "Android TV"). default: patches-source owner.
 
@@ -32,6 +32,8 @@ author-page = "github.com/nullcpy/rvb" # module author page/link printed during 
 
 patches-version = "stable"  # 'stable', 'beta', 'both', or a version number. default: "stable"
 cli-version = "stable"      # 'stable', 'beta', or a version number. default: "stable"
+# 'stable' and 'beta' are the only channel keywords; a keyword resolves against
+# state/patch_sources.json (see Pool Routing below). 'both' is routing, not a channel.
 
 > [!TIP]
 > **File-Level Defaults in Modular Configs:**  
@@ -48,6 +50,12 @@ patch-folder = "someapp" # explicit patch folder name override. forces the CI to
 enabled = true       # whether to build the app. default: true
 build-mode = "both"  # 'both', 'apk' or 'module'. default: apk
 arch = "both"        # 'both', 'auto', 'all', 'arm64-v8a', 'arm-v7a', 'x86_64', or 'x86'. default: both
+# A requested arch is a hard requirement: a build is produced only when a download
+# actually carries that ABI (or is universal / has no native code at all). A wrong
+# single ABI is rejected and the next source tried; if none supplies the arch, that
+# channel is simply not built - never shipped under another arch's name. So an
+# arm64-only app publishes only its arm64 artifact and no arm-v7a file, and the
+# reverse. Universal bundles serve both channels from one fetch.
 
 # 'auto' option gets the latest possible version supported by all the included patches
 # 'exp' gets the latest experimental version from patches.json. falls back to 'latest' if none found.
@@ -56,7 +64,12 @@ arch = "both"        # 'both', 'auto', 'all', 'arm64-v8a', 'arm-v7a', 'x86_64', 
 version = "auto"     # 'auto', 'exp', 'latest', 'beta' or a version number (e.g. '17.40.41'). default: auto
 # target Android versionCode. 'auto' automatically resolves the supported versionCode from patch metadata (e.g. Morphe Desktop).
 # can also be set to an explicit versionCode (e.g. '473623755') or mapped per-architecture ('arm64-v8a: 473623755 | arm-v7a: 473623748').
-# used by APKMirror to select the exact build variant and to validate/invalidate cached and downloaded APKs. default: "" (or auto when resolved)
+# used by APKMirror and the cache repo to pick the exact build variant, and enforced on
+# every download from any source: the APK's own versionCode is read back and a mismatch -
+# or a file it cannot read a code from - rejects it and falls through to the next source.
+# Also part of the stock-APK cache key (<pkg>-<version>-<code>-<arch>), so two builds that
+# share a version string but differ by code never collide. Apps whose patches declare no
+# versionCode get no code in the name and no such check. default: "" (or auto when resolved)
 version-code = "auto"
 
 # optional args to be passed to cli. can be used to set patch options
@@ -71,9 +84,10 @@ excluded-patches = """\
   'Some Other Patch' \
   """                                                      # whitespace seperated list of patches to exclude. When mixing multiple `patches-source` bundles, you can use `|` to separate the patches for each bundle. To skip a bundle, leave the side empty (e.g. `" | 'Patch for second bundle'"`).
 
-included-patches = "'Some Patch'"                          # whitespace seperated list of non-default patches to include. default: "". When mixing multiple `patches-source` bundles, you can use `|` to separate the patches for each bundle. To skip a bundle, leave the side empty (e.g. `" | 'Patch for second bundle'"`).
+included-patches = "'Some Patch'"                          # whitespace seperated list of non-default patches to include. default: "". When mixing multiple `patches-source` bundles, you can use `|` to separate the patches for each bundle. To skip a bundle, leave the side empty (e.g. `" | 'Patch for second bundle'"`). These names decide more than the `-e` list: the versions the build will accept, and the versionCode it pins per arch, are read from **these** patches (`list-patches`) rather than the CLI's default-enabled set (`list-versions`), so an app whose patches ship `Enabled: false` only builds when they are named here.
 include-stock = "merged"                                   # 'merged', 'split' or 'disable'. default: merged
 exclusive-patches = false                                  # exclude all patches by default. Accepts `true`, `false`, or a string of patch sources (e.g. `"'jkennethcarino/adobo'"`). When a specific patch source is provided, only that bundle becomes exclusive, while others retain their default patches. default: false
+inclusive-patches = false                                  # the mirror of `exclusive-patches`: `true` applies **every** patch the CLI lists for this app, so you curate downwards with `excluded-patches` instead of writing out dozens of `included-patches` names. Boolean only (no patch-source list), cannot be combined with `exclusive-patches`, and needs a tool that can list patches (Morphe/ReVanced - not Xposed modules or Instafel). "Every" is the package-filtered listing the builder already reads (`list-patches -f <pkg> -x`), so patches declaring no package are not included. Names are expanded at build time from the live listing: a patch the author adds later is picked up automatically, and since Morphe aborts when a patch fails, that automatic pickup can break a build with no change on your side. default: false
 
 apkmirror-dlurl = "https://www.apkmirror.com/apk/inc/app"
 uptodown-dlurl = "https://spotify.en.uptodown.com/android"
@@ -87,12 +101,109 @@ github-release-regex = "^Beta"
 # regex used to pick the exact apk file from the github release assets. supports {version} and {arch} string interpolation.
 # you can define a generic regex, or map architectures to specific regexes using 'arch: regex | arch2: regex2'.
 github-regex = "arm64-v8a: 'MyApp-arm64-v{version}\\.apk' | arm-v7a: 'MyApp-arm-v{version}\\.apk'"
-# direct download url. the url must have point to an apk file with name format shown in this example
+# F-Droid source. Two URL shapes are accepted, and in both cases the versions come from
+# what the repo publishes - never from guessing at a filename:
+#   package page   https://f-droid.org/en/packages/<pkg>/  - the site's own JSON endpoint
+#                  (<origin>/api/v1/packages/<pkg>) is asked for the releases, and the
+#                  file name is built from F-Droid's grammar, <pkg>_<versionCode>.apk.
+#                  The repo index is not fetched here: it is 15.8 MB compressed.
+#   repo root      https://apt.izzysoft.de/fdroid/repo     - any third-party repo, read
+#                  through its index-v1.jar (falling back to index.jar). This form names
+#                  no app, so `pkg-name` is required with it. It also yields each file's
+#                  exact published name and the ABIs it carries, so a repo whose author
+#                  named a file oddly is still fetched correctly, and a release that does
+#                  not mention the requested arch is skipped before any transfer.
+# One APK per version code: F-Droid ships a universal file and declares its ABIs, so no
+# variant picker applies, and `version-code` selects a specific build outright. Only the
+# ~12 most recent releases are listed by a repo's page/API - an older pinned version has
+# to come from `cache_repo`, `archive` or a repo index.
+fdroid-dlurl = "https://f-droid.org/en/packages/org.fdroid.fdroid/"
+# direct download url. Nothing is read out of the URL itself: the link is fetched and
+# the package name, version, versionCode and ABI coverage are taken from the file it
+# serves. So a nameless endpoint that always points at the vendor's current build works
+# as well as a link ending in a versioned filename, and the filename is never trusted.
+# Keep `pkg-name` set: with it, an artifact for any other package is rejected and the
+# source is skipped; without it the downloaded file's own package is what gets patched.
+# When the served version is not one the patch set supports, the direct source is
+# dropped and the version-selecting sources below are asked for the resolved version.
 direct-dlurl = "https://website/com.google.android.youtube-20.40.45-all.apk"
 
 module-prop-name = "some-app-module"                       # module prop name. default: "<app>-<author>"
-dpi = "360-480dpi"                                         # used to select apk variant from apkmirror. 'auto' matches whatever is available. default: nodpi anydpi auto
+# write an `updateJson=` line into the built Magisk/KernelSU module's module.prop, so a
+# manager polls this repo's update branch for a newer build of that module instead of
+# the user re-downloading it by hand. The path is the module id without its author and
+# channel suffixes, under the pool folder it was built from: `stable/<id>.json` or
+# `beta/<id>.json`. That string is a wire format - installed modules on the wild already
+# carry it, so changing the layout orphans them.
+# FILE-LEVEL ONLY (an app block cannot change it), and forced off for local builds,
+# where there is no published update branch to point at. default: true in CI, false locally
+enable-module-update = true
+dpi = "360-480dpi"                                         # apkmirror variant filter: rows whose `Screen DPI` column is listed here are preferred, 'auto' accepts whatever else the release has. Among the rows that pass arch/versionCode/dpi, the lowest `Minimum Version` wins so the build installs on the oldest device, then the widest architecture coverage. default: nodpi anydpi auto
+# Ordered download-format chain, space-delimited, from: apk apkm xapk apks.
+# A PREFIX of each source's variant order, never a filter: the named shape is fetched
+# first when a predicate-matching variant of it exists, and when it does not the source
+# still serves whatever else it has - nothing here hard-fails a store, and arch,
+# version and versionCode remain the hard gates they always were. Case is normalized;
+# a repeated token is dropped with a warning; an unknown token fails the compile.
+# What each source can honour:
+#   apkmirror  its rows only distinguish split bundles (.apkm/.xapk) from single-file
+#              APKs, so the chain collapses to that choice (badge-first stays the
+#              default when the key is unset).
+#   apkpure    picks /b/APK/ vs /b/XAPK/ among the arch-matching links; with the key
+#              unset the kind stays inherited from the page's featured link as before.
+#   apkcombo   reorders the version-page probes (apk / xapk / apks).
+#   archive    reorders the filename extension scan; the legacy `apk.apkm`-style
+#              composite names always stay in the tail.
+#   uptodown   chooses between the arch-labelled and the universal variant row by their
+#              xapk flag; the store's own file kind still decides the saved extension.
+#   fdroid, github, direct, cache_repo  ignored with a warning: one artifact per
+#              release, there is no variant to prefer.
+# Unset (the default, per app and file-level) keeps every source's own built-in order.
+# Universal-over-per-ABI coverage is NOT this key's axis: it is a download-quota policy
+# and stays as documented at each source above.
+# Setting it does not rebuild anything: a cached stock APK skips the fetch it steers, so
+# the preference simply applies on the next build that happens for a real reason.
+preferred-format = "apk apkm"
 ```
+
+## Which Config Edits Cost a Rebuild
+
+An app is rebuilt when something that changes **what an artifact is built from, or
+whether it is built at all** moved since its last successful build — or when its patch
+source publishes a release, or its own version moves on a store. What each app was
+last built from is recorded per app in `state/built_shape.json` (why:
+[docs/decisions/0014](docs/decisions/0014-config-changes-that-earn-a-rebuild.md)).
+
+- **Editing these rebuilds the app:** `patches-source`, `patches-source-host`,
+  `patches-version`, `cli-source`, `cli-source-host`, `cli-version`,
+  `brand`, `variant`, `sub-variant`, `app-name`, `pkg-name`, `patched-pkg-name`,
+  `included-patches`, `excluded-patches`, `exclusive-patches`, `inclusive-patches`,
+  `patcher-args`, `arch`, `build-mode`, `version`, `version-code`, `dpi`,
+  `include-stock`, `compression-level`, `remove-rv-integrations-checks`,
+  `github-release-regex`, `github-regex`, `module-prop-name`, `enable-module-update`.
+- **Editing these does not:** any `*-dlurl` — they choose *where* the same artifact is
+  fetched from, and if a store ever serves different bytes the build's own content
+  fingerprint says so on the next real build; `preferred-format` — it steers a fetch the
+  cache check usually skips entirely, so setting it wakes no app: it takes effect on the
+  next build that happens for a real reason; `patch-folder` — the CI uses it to
+  attribute patch-bundle folders to an app and the engine never reads it, so a rebuild
+  over it reproduces identical bytes and the duplicate-build hash withholds them; the
+  corrected attribution lands with the source's next release, when the bundle is hashed
+  again; `enabled` — turning an app off retires
+  its queued retry, turning it back on rebuilds nothing unless a field above also
+  moved; `author` and `author-page` — read from a file's top-level defaults only, never
+  from an app block.
+- **`build-mode` and `arch` count only when they widen.** Asking for fewer artifacts
+  than the last build produced queues nothing: no rebuild can un-publish what is
+  already on the release.
+
+A key that no code reads is rejected when the configs are compiled, with the closest
+recognised names suggested — so `folder-name`, which this file never documented and
+which silently did nothing for as long as it sat in a live config, now fails the run
+instead of being ignored by it.
+
+A rebuild caused by your edit is announced with the field that moved
+(`build-mode: apk → both`), so a config change is never followed by silence.
 
 ### Naming & Catalog Hierarchy
 
@@ -147,12 +258,20 @@ patches-source = """\
 patches-source-host = "github"
 
 # If sources span different hosts, provide one value per source in order:
-patches-source-host = "'github' 'gitlab'"
+patches-source-host = "'github' 'gitlab'"        # any of github | gitlab | codeberg
 
 # Same rule applies to patches-version:
-patches-version = "latest"                        # applies to all sources
-patches-version = "'latest' 'v1.2.3'"             # per-source versions
+patches-version = "stable"                        # applies to all sources
+patches-version = "'stable' 'v1.2.3'"             # per-source versions
 ```
+
+> [!NOTE]
+> **Codeberg sources** (`"codeberg"`) are read through Forgejo's GitHub-compatible API:
+> stable vs beta is the same `prerelease` flag GitHub uses, drafts are ignored, and the
+> listing is requested with `limit=50` because that API silently ignores `per_page`. The
+> bundle is downloaded from the release asset's `browser_download_url`, whatever the file
+> is called (`app-release.apk` is common for Xposed modules), and the changelog link is
+> built as `https://codeberg.org/<owner>/<repo>/releases/tag/<tag>`.
 
 > [!TIP]
 > **Per-bundle patch selection**: When using multiple sources, separate patch lists 
@@ -166,20 +285,49 @@ patches-version = "'latest' 'v1.2.3'"             # per-source versions
 
 ## Xposed Modules (NPatch / LSPatch)
 
-You can natively inject Xposed modules into an app using `7723mod/NPatch` or `LSPatch` directly from your config. Simply set the `cli-source` to the NPatch repository and the `patches-source` to the Xposed module repository.
+You can inject Xposed modules into an app with `7723mod/NPatch` or
+`JingMatrix/LSPatch` straight from your config: set `cli-source` to the patcher
+repository and `patches-source` to the module repository. Anything in `cli-source`
+containing `npatch` or `lspatch` selects this flow; the engine then skips the
+ReVanced CLI argument set entirely and runs the injection command instead.
 
 ```toml
 [Discord]
-cli-source = "7723mod/NPatch"                            # Use NPatch as the CLI
-cli-version = "latest"
-patches-source = "revenge-mod/revenge-xposed"            # Provide the Xposed module as the patches bundle
-patches-version = "latest"
+cli-source = "JingMatrix/LSPatch"                         # or "7723mod/NPatch"
+cli-version = "stable"
+patches-source = "revenge-mod/revenge-xposed"           # the Xposed module is the "patches bundle"
+patches-version = "stable"
 version = "auto"                                         # 'auto' safely falls back to 'latest' since modules don't list supported versions
 arch = "auto"
 github-dlurl = "https://github.com/discord/releases/..." # Or apkmirror, etc.
 ```
 
-When the script detects `npatch` or `lspatch` in the CLI source, it will automatically bypass ReVanced CLI arguments and execute the correct injection command. You can also pass extra options to NPatch using `patcher-args = "-l 2"`.
+### Signing is handled for you, so never write it here
+
+These tools sign their own output, so the engine passes your release identity to
+them itself: `-k <store> <password> <alias> <password>`, where the store is the BKS
+one for NPatch and the PKCS12 one for LSPatch (each can only read its own format).
+Do **not** put `-k`, a keystore path or any password into `patcher-args`: the
+configs are published to the public `data` branch, and the signing password would go
+with them. If a build ever reports it cannot find a keystore, that is a CI secret or
+a local `RVB_KEYSTORE*` problem, not a config one
+(see [docs/contributing.md](docs/contributing.md)).
+
+### `-l` means different things in the two tools
+
+`patcher-args` is passed through verbatim, and the signature-bypass scale is not
+shared between them, so a level copied from one tool's docs is a different setting
+in the other:
+
+| Tool | Levels | Default | Notes |
+|---|---|---|---|
+| NPatch | `0` None, `1` Basic, `2` High, `3` Extreme, `4` Seccomp | `1` | `3` and `4` need manager mode and are rejected in embedded (`-m`) mode |
+| LSPatch | `0` disable, `1` pm, `2` pm+openat, `3` +raw-syscall hooks | `0` | `3` patches native code, so an app that verifies its own code may notice it |
+
+Omit `-l` to take the tool's own default. The same applies to `--injectdex`: it
+puts the loader into the app's own dex list so that *isolated* sub-processes get
+hooked, and it is an opt-in for modules that need those processes, not a fix for an
+app that crashes on launch.
 
 ## Instafel Patcher (Instagram Alpha)
 
@@ -203,15 +351,30 @@ directly instead of pre-merging it with apkeditor. Morphe merges bundles
 natively, and some apps misbehave after apkeditor's rewrite+re-sign, so this
 produces cleaner patched APKs and avoids caching two copies of the same app.
 
+No merge is performed at all in this mode, for any download source: the engine
+extracts the bundle's `base.apk` purely so the usual package / versionName /
+versionCode checks have a real APK to read, and leaves the bundle untouched for
+patching. (Until now the merge still ran and its output was deleted minutes later
+when the bundle was adopted — an apkeditor JVM start and a full archive pass per
+bundle download, for nothing.)
+
 - **Scope**: automatic — no per-app config. Applies per build when the download
   is a bundle; plain `.apk` stocks and all other patcher tools (revanced family,
   Xposed, instafel) are untouched.
-- **Cache**: the bundle is stored once as `${pkg}-${version}-all.xapk` (or
-  `.apkm`/`.apks`). For `arch = all`/`auto` it goes to morphe whole; for
-  `arm64-v8a`/`arm-v7a`/`x86`/`x86_64` the engine strips only the *other ABIs'*
-  `config.*` members (a `zip -d`, no merge, no re-sign) and passes the trimmed
-  bundle. Switching an app from `all` to `both`/`arm64-v8a` reuses the cached
-  bundle rather than re-downloading.
+- **Cache**: a bundle is stored under the ABIs it actually carries, read off its
+  contents: `${pkg}-${version}-${versionCode}-all.xapk` when it holds every arm ABI or
+  none, and `${pkg}-${version}-${versionCode}-arm64-v8a.xapk` when it holds only that
+  one (`.apkm`/`.apks` likewise). A universal bundle is shared: for `arch = all`/`auto`
+  it goes to morphe whole, and for `arm64-v8a`/`arm-v7a`/`x86`/`x86_64` the engine
+  strips only the *other ABIs'* `config.*` members (a `zip -d`, no merge, no re-sign)
+  and passes the trimmed bundle, so switching an app from `all` to `both`/`arm64-v8a`
+  reuses the cached bundle rather than re-downloading.
+  That sharing rested on a premise that is not always true: APKPure and APKCombo publish
+  *per-arch* bundles (atvTools 1.3.2 arm64 = base + `config.arm64_v8a` +
+  `config.xxxhdpi`, nothing else). Stored as `-all`, such a bundle was adopted by the
+  `arm-v7a` build, which trimmed away the only ABI split it had and then failed in the
+  patcher for want of `lib/armeabi-v7a`. Keys now come from the artifact, so a build can
+  only find a bundle that is able to serve it.
 - **Module stock**: `include-stock = merged` merges from the cached bundle on
   demand (throwaway, never cached); `split` reads the bundle directly; `disable`
   needs nothing. All three work with passthrough active.
@@ -224,7 +387,7 @@ produces cleaner patched APKs and avoids caching two copies of the same app.
 
 ## Modular Configuration Directory & Dynamic Pool Routing
 
-Configurations are organized in `.github/configs/patches/*.toml` (e.g. `morphe.toml`, `anddea.toml`, `piko.toml`, `ajstrick81.toml`).
+Configurations are organized in `configs/patches/*.toml` (e.g. `morphe.toml`, `anddea.toml`, `piko.toml`, `ajstrick81.toml`).
 
 You do **not** need separate files for stable and beta:
 - **Single-File Co-existence**: All variants and builds for a brand or patch source can reside in the same `.toml` file.
@@ -235,26 +398,49 @@ You do **not** need separate files for stable and beta:
   - **Both Pools**: Setting `patches-version = "both"` (at the top of the file or in an app block) compiles the app into **both** stable and beta pools.
   - **Beta Only**: Setting `patches-version = "beta"` routes the app exclusively to the beta (pre-release) build pool.
   - **File-Level Defaults**: Setting `patches-version = "both"` (or `"beta"`) at the top applies that channel to all apps in the file unless individually overridden.
-  - **Filename Inference**: A filename with `.beta.toml` (or legacy `.dev.toml`) automatically defaults all apps in that file to beta. Renaming to `*.toml` defaults to stable unless `patches-version = "both"` is set.
+  - **Filename Inference**: A filename with `.beta.toml` automatically defaults all apps in that file to beta. Renaming to `*.toml` defaults to stable unless `patches-version = "both"` is set. (A legacy `.dev.toml` spelling is no longer recognized — a source named like `devanced.toml` would otherwise be mistaken for one.)
+  - **Concrete Version Pins**: A version number instead of a channel (e.g. `patches-version = "v4.8.3"`) pins that exact release — one app when written in an app block, every app in the file when written at the top level. The generated pool config carries it verbatim and nothing rewrites it.
+  - **Channel Resolution**: `"stable"` and `"beta"` are the only channel keywords, and they stay as keywords in the generated config; the build resolves each source's keyword against `state/patch_sources.json`, the watcher's record of that source's current release per channel. One source of truth instead of a stamped copy that can go stale, and a build run is consistent with the state it was generated from because `configs/` and `state/` come from the same `data` commit. A source with no release recorded on that channel falls back to listing the releases live. Any other word is treated as a release tag, so a mistyped channel fails on the release lookup rather than building the wrong thing.
+  - **Blocked Sources**: when the forge answers `404` (deleted or renamed), `451` (legal takedown) or `403` (private or access refused), the watcher marks that source `blocked` and freezes its last known tags. A build then **skips every app using it** - keyword or pinned version alike - instead of querying the releases endpoint, because neither a retry nor a live listing can recover a repository that is gone. The app is logged as "Could not get prebuilts" and the run moves on; it comes back on its own once the source is reachable again.
   - **Disabling an App**: Set `enabled = false` to disable an app across all pools.
 
 ## Automated Patch Sources State Tracking
 
-Patch sources and their release versions in `.github/configs/patch_sources.json` are **100% automated**:
-- The CI automatically scans all `.toml` files, discovers every active `patches-source` repository and host (`github` or `gitlab`), and checks for new stable and beta releases.
+> **Where configs and state live:** main is **pure code** — everything under
+> `configs/` and `state/` is **not tracked there**. The canonical copies live on
+> the dedicated **`data`** branch:
+>
+> - `configs/config.manual.toml`, `configs/patches/*.toml` — **yours**: edit the
+>   local (ignored) copies, then publish with
+>   `bash .github/scripts/push_data_configs.sh "<message>"`.
+> - `configs/stable_build.json`, `configs/beta_build.json` — generated pool
+>   configs, written by the watcher only.
+> - `state/*.json` (`patch_sources`, `app_versions`, `patch_file_hashes`) —
+>   machine state, written by the watcher only (`commit_data_branch.sh`).
+>
+> Every CI job materializes them via `fetch_data_branch.sh` right after
+> checkout; do the same locally after cloning (it also refreshes your TOML
+> copies from the branch — push your edits **before** fetching, fetch
+> overwrites). Never hand-commit JSONs; to force a state change, edit the
+> local file and let the watcher pick it up, or commit directly to `data`.
+
+Patch sources and their release versions in `state/patch_sources.json` are **100% automated**:
+- The CI automatically scans all `.toml` files, discovers every active `patches-source` repository and host (`github`, `gitlab` or `codeberg`), and checks for new stable and beta releases.
 - Unreferenced or deleted patch sources are pruned automatically.
 - **You do not need to manually edit `patch_sources.json`.** Simply add or update `patches-source` in your `.toml` files.
+- The build reads this file to turn a `patches-version = "stable"|"beta"` keyword into a concrete tag, so it is the answer to "what is the current release" for both the watcher and the builder.
+- A `blocked: true` entry is the watcher's record that the repository cannot be reached (404/451/403, on any of the three forges). Its tags are kept as they were, and the build refuses to use them - it skips the app rather than spend a request on a dead repository.
 
 ## Automatic App Version Checking
 
 The CI workflow automatically detects when a new version of an app is released on APKMirror, Uptodown, or Archive.org.
 
 ### How it Works
-1. **Version Fetching**: During the CI run, it reads all enabled apps from the `.github/configs/patches/*.toml` configurations and queries the URLs (`uptodown-dlurl`, `apkmirror-dlurl`, etc.).
-2. **Comparison**: It checks the newly fetched versions against the currently stored versions in `.github/configs/app_versions.json`.
+1. **Version Fetching**: During the CI run, it reads all enabled apps from the `configs/patches/*.toml` configurations and queries the URLs (`uptodown-dlurl`, `apkmirror-dlurl`, etc.).
+2. **Comparison**: It checks the newly fetched versions against the currently stored versions in `state/app_versions.json`.
 3. **Triggering**: If a new version is detected, the app is added to a temporary `active_apps.json` list, and the CI is triggered to build it.
 ### Tracking File
-App versions are permanently tracked and committed to `.github/configs/app_versions.json`.
+App versions are permanently tracked in `state/app_versions.json` (on the `data` branch, see above).
 You can manually update this file if you need to force a specific version state, but the CI will automatically manage it during scheduled runs.
 
 **Selective Checking:** If you only want the CI to check specific apps (instead of all enabled apps in your config), you can add `"_check_only_listed": true` to the top level of `app_versions.json`. When this is true, the script will only check for updates for the apps that already exist as keys in the file, saving time and resources.
@@ -263,21 +449,26 @@ You can manually update this file if you need to force a specific version state,
 
 Maintenance and cleanup workflows keep GitHub Releases and changelogs pruned. The
 website catalog (`data.json` on `nullcpy.github.io`) is **derived, not edited**: every
-release carries a `build.json` manifest and the website repo regenerates its catalog
-from scratch by folding those manifests against the live releases API.
+build's metadata lives in a `build.json` manifest on the repo's `website` branch and
+the website repo regenerates its catalog from scratch by folding those manifests
+against the live releases API.
 
 ### Release Manifests (`build.json`)
 - **What**: a per-release, filename-keyed JSON manifest describing every APK/module
   in that release — app identity, brand, variant, version, arch, patch sources and
   `appliedPatches`. Schema documented in `.github/scripts/build_make_manifest.py`.
-- **Numbered releases**: the builder uploads one manifest per build
-  (`build_make_manifest.py` → release asset `build.json`).
+- **Numbered releases**: the builder generates one manifest per build
+  (`build_make_manifest.py` → `temp/manifest/build.json`); it is committed to the
+  `website` branch as `manifests/<tag>.json`, not uploaded as a release asset.
 - **Archive releases (`stable`/`beta`)**: after each archive file upload,
-  `merge_archive_manifest.sh` downloads the release's existing `build.json`, unions it
-  with the new build's entries (same filename = file replaced = metadata replaced),
-  drops entries whose file no longer exists in the release, and uploads the result.
-  The archive therefore carries cumulative metadata for every file it contains, even
-  after the originating numbered release is deleted.
+  `merge_archive_branch.sh` checks out the repo's `website` branch, unions the
+  new build's entries with the cumulative `archive/<channel>.json` there (same
+  filename = file replaced = metadata replaced), drops entries whose file no
+  longer exists in the release, commits `manifests/<tag>.json` alongside, and
+  pushes. The archive therefore carries cumulative metadata for every file it
+  contains, even after the originating numbered release is deleted — and the
+  branch history makes any manifest loss recoverable via `git log -p` /
+  `git show <rev>:archive/stable.json`.
 - **Backfill**: `.github/scripts/backfill_manifests.py` (run with `--apply`) can
   regenerate manifests on all live releases from a healthy `data.json` (one-time
   migration tool; dry run by default).
@@ -285,16 +476,19 @@ from scratch by folding those manifests against the live releases API.
 ### Website Rebuild (nullcpy.github.io repo)
 `.github/workflows/rebuild-catalog.yml` runs on `repository_dispatch
 (catalog-updated)` — sent fire-and-forget by `build.yml` and `cleanup.yml` — plus a
-scheduled safety net. It fetches all live releases and their `build.json`, regenerates
-`data.json` (schema v2) from scratch, and pushes only on material change. Deletions are
-automatic: a release or asset that no longer exists simply doesn't appear. Circuit
-breakers abort a rebuild (leaving `data.json` untouched) if the releases API looks
-empty (< 10 releases) or the catalog shrinks beyond `MIN_RATIO` (default 0.6); `FORCE=1`
-overrides. Releases without a manifest get minimal filename-derived fallback entries.
+scheduled safety net. It checks out the `website` branch of this repo for the
+manifests (plus fetches live releases for existence, sizes, and download
+counts), regenerates `data.json` (schema v2) from scratch, and pushes only on
+material change. Deletions are automatic: a release or asset that no longer
+exists simply doesn't appear. Circuit breakers abort a rebuild (leaving
+`data.json` untouched) if the releases API looks empty (< 10 releases) or the
+catalog shrinks beyond `MIN_RATIO` (default 0.6); `FORCE=1` overrides.
+Releases without a manifest get minimal filename-derived fallback entries.
 
 ### Automated Routine Cleanup (`cleanup.yml`)
 - **Numbered Releases**: Retains the latest 98 numbered releases via `ophub/delete-releases-workflows`. Keeping 98 *is* the catalog's history window — deleted releases vanish from the website, which is correct since their files are gone.
 - **Archive Releases**: Retains rolling `stable` and `beta` releases, keeping up to 2 versions per asset group via `cleanup-archive-assets.py`. Pruned assets drop out of the catalog automatically at the next rebuild.
+- **Website Branch**: `cleanup_website_branch.sh` deletes `manifests/<tag>.json` for numbered releases that no longer exist (same pattern as the update branch's changelog pruning).
 - Ends with a fire-and-forget `catalog-updated` dispatch so the website reflects deletions promptly.
 
 ### Full Clean Slate / Rebuilding from Scratch

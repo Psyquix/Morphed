@@ -2,7 +2,12 @@ name: CI
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "11 0 * * *"
+    - cron: "46 4 * * *"
+    - cron: "08 8 * * *"
+    - cron: "52 12 * * *"
+    - cron: "29 16 * * *"
+    - cron: "03 20 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -31,6 +36,12 @@ jobs:
           ref: main
           fetch-depth: 1
 
+      - name: Setup Python dependencies
+        run: pip install --no-cache-dir curl_cffi || true
+
+      - name: Fetch configs & state (data branch)
+        run: bash .github/scripts/fetch_data_branch.sh
+
       - name: Compile Base Configs (JSON)
         run: bash .github/scripts/ci_compile_base_configs.sh
 
@@ -38,35 +49,56 @@ jobs:
         id: sync_patch_sources
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
         run: python3 .github/scripts/sync_patch_sources.py
-
-      - name: Setup Python dependencies
-        run: pip install --no-cache-dir curl_cffi || true
 
       - name: Fetch App Versions
         id: fetch_app_versions
         env:
           CF_SOLVER_URL: "http://localhost:8000"
         run: bash .github/scripts/ci_fetch_app_versions.sh
-        
+
       - name: Compare App Versions
         id: compare_apps
         run: bash .github/scripts/ci_compare_app_versions.sh
 
+      # Reconcile the config against what was last built (ADR 0010): enqueue new
+      # apps/arches, prune retries whose arch left the config, and carry over the
+      # build job's pending retries. Always runs (cheap, local jq only) so a
+      # pending item from a previous run keeps the build alive even when nothing
+      # else moved. Writes state/built_shape.json, state/pending_builds.json and
+      # the pending.<channel>.json arrays the generator consumes.
+      - name: Detect config changes
+        id: detect_changes
+        run: bash .github/scripts/ci_detect_config_changes.sh
+
+      # Single owner of "is there any work left downstream". Every step below
+      # reads these two outputs instead of re-pasting the trigger expressions.
+      - name: Classify triggers
+        id: flags
+        env:
+          TRIGGER_STABLE: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE || '0' }}
+          TRIGGER_BETA: ${{ steps.sync_patch_sources.outputs.TRIGGER_BETA || '0' }}
+          TRIGGER_BLOCKED: ${{ steps.sync_patch_sources.outputs.TRIGGER_BLOCKED || '0' }}
+          TRIGGER_APP_UPDATE: ${{ steps.compare_apps.outputs.TRIGGER_APP_UPDATE || '0' }}
+          TRIGGER_CONFIG_CHANGE: ${{ steps.detect_changes.outputs.TRIGGER_CONFIG_CHANGE || '0' }}
+        run: bash .github/scripts/ci_trigger_flags.sh
+
       - name: Check Patch App Updates
-        if: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE == '1' || steps.sync_patch_sources.outputs.TRIGGER_BETA == '1' }}
+        if: ${{ steps.flags.outputs.SOURCES_CHANGED == '1' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 .github/scripts/ci_check_app_patches.py
 
       - name: Generate configs (JSON)
-        if: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE == '1' || steps.sync_patch_sources.outputs.TRIGGER_BETA == '1' || steps.sync_patch_sources.outputs.TRIGGER_BLOCKED == '1' || steps.compare_apps.outputs.TRIGGER_APP_UPDATE == '1' }}
+        if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
         id: generate_configs
         env:
           TRIGGER_STABLE: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE }}
           TRIGGER_BETA: ${{ steps.sync_patch_sources.outputs.TRIGGER_BETA }}
           TRIGGER_APP_UPDATE: ${{ steps.compare_apps.outputs.TRIGGER_APP_UPDATE }}
           TRIGGER_BLOCKED: ${{ steps.sync_patch_sources.outputs.TRIGGER_BLOCKED }}
+          TRIGGER_CONFIG_CHANGE: ${{ steps.detect_changes.outputs.TRIGGER_CONFIG_CHANGE }}
         run: bash .github/scripts/ci_generate_configs.sh
 
       - name: Resolve effective triggers
@@ -75,14 +107,23 @@ jobs:
           RAW_TRIGGER_STABLE: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE || '0' }}
           RAW_TRIGGER_BETA: ${{ steps.sync_patch_sources.outputs.TRIGGER_BETA || '0' }}
           RAW_TRIGGER_APP_UPDATE: ${{ steps.compare_apps.outputs.TRIGGER_APP_UPDATE || '0' }}
+          RAW_TRIGGER_CONFIG_CHANGE: ${{ steps.detect_changes.outputs.TRIGGER_CONFIG_CHANGE || '0' }}
         run: bash .github/scripts/ci_resolve_triggers.sh
 
       - name: Notify telegram
-        if: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE == '1' || steps.sync_patch_sources.outputs.TRIGGER_BETA == '1' || steps.sync_patch_sources.outputs.TRIGGER_BLOCKED == '1' || steps.compare_apps.outputs.TRIGGER_APP_UPDATE == '1' }}
+        if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
+        # continue-on-error because check_patch gates every build job below: a
+        # missing chat handle or topic ID is a notification-config error and must
+        # not fail the job, block build_beta/build_stable on their needs, and stop
+        # a release that the watcher has already decided to trigger.
+        continue-on-error: true
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: "${{ vars.TG_CHAT_ID || '@rvb27' }}"
-          TG_THREAD_CI: "${{ vars.TG_THREAD_CI || '2747' }}"
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_CI: ${{ vars.TG_THREAD_CI }}
+          # Optional Discord mirror of this same text (#patch-alert); unset means
+          # "not mirrored", never "send somewhere else" (see notify_discord.sh).
+          DISCORD_WEBHOOK_PATCH_ALERT: ${{ secrets.DISCORD_WEBHOOK_PATCH_ALERT }}
           TRIGGER_STABLE: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE }}
           TRIGGER_BETA: ${{ steps.sync_patch_sources.outputs.TRIGGER_BETA }}
           TRIGGER_APP_UPDATE: ${{ steps.compare_apps.outputs.TRIGGER_APP_UPDATE }}
@@ -90,21 +131,55 @@ jobs:
           EFFECTIVE_BETA: ${{ steps.effective_triggers.outputs.TRIGGER_BETA }}
         run: bash .github/scripts/ci_notify_telegram.sh
 
+      - name: Notify build queue
+        if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
+        # ONE message on the log topic naming every app this run will actually build,
+        # grouped by patch source and by the release tag that source resolves to. Reads
+        # the EFFECTIVE triggers rather than the raw ones, because
+        # ci_resolve_triggers.sh has already dropped any channel whose regenerated pool
+        # has no enabled apps - naming such a pool would announce builds nobody starts.
+        # The build jobs cannot report this: each sees only its own pool.
+        # continue-on-error for the same reason as the step above: a notify-config error
+        # must not fail check_patch and block both build jobs.
+        continue-on-error: true
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_NOTIFY: ${{ vars.TG_THREAD_NOTIFY }}
+          DISCORD_WEBHOOK_GITHUB_LOG: ${{ secrets.DISCORD_WEBHOOK_GITHUB_LOG }}
+          EFFECTIVE_STABLE: ${{ steps.effective_triggers.outputs.TRIGGER_STABLE }}
+          EFFECTIVE_BETA: ${{ steps.effective_triggers.outputs.TRIGGER_BETA }}
+        run: bash .github/scripts/ci_notify_queue.sh
+
+      - name: Notify announcements
+        if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
+        # One message on the NullStore announcement topic, separate from the CI
+        # thread: apps newly added to the config, and apps the watcher woke because
+        # their own tracked config moved (with the field that changed). No-op unless
+        # ci_detect_config_changes.sh enqueued something this run. Fail-soft like
+        # every other notify path.
+        continue-on-error: true
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_ANNOUNCE: ${{ vars.TG_THREAD_ANNOUNCE }}
+          DISCORD_WEBHOOK_GITHUB_LOG: ${{ secrets.DISCORD_WEBHOOK_GITHUB_LOG }}
+          WEBSITE_LINK: ${{ vars.RELEASE_NOTES_WEBSITE_LINK }}
+        run: bash .github/scripts/ci_notify_announcements.sh
+
       - name: Commit updated patch sources and configs
-        if: ${{ steps.sync_patch_sources.outputs.TRIGGER_STABLE == '1' || steps.sync_patch_sources.outputs.TRIGGER_BETA == '1' || steps.sync_patch_sources.outputs.TRIGGER_BLOCKED == '1' || steps.compare_apps.outputs.TRIGGER_APP_UPDATE == '1' }}
-        uses: stefanzweifel/git-auto-commit-action@v7
-        with:
-          branch: main
-          skip_checkout: true
-          file_pattern: .github/configs/*.json
-          commit_message: "Update patch sources, app versions and generated configs [skip ci]"
+        if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
+        # Commits state/*.json + configs/*_build.json to the `data` branch
+        # (plumbing-only, keeps main's history human-only; TOMLs are excluded
+        # and go through push_data_configs.sh). Counterpart: fetch_data_branch.sh.
+        run: bash .github/scripts/commit_data_branch.sh
 
   build_beta:
     needs: check_patch
     if: ${{ needs.check_patch.outputs.trigger_beta == '1' }}
     uses: ./.github/workflows/build.yml
     with:
-      config_file: ".github/configs/config.beta.updated.json"
+      config_file: "configs/beta_build.json"
     secrets: inherit
 
   build_stable:
@@ -112,7 +187,7 @@ jobs:
     if: ${{ always() && needs.check_patch.outputs.trigger_stable == '1' && needs.check_patch.result == 'success' && needs.build_beta.result != 'cancelled' }}
     uses: ./.github/workflows/build.yml
     with:
-      config_file: ".github/configs/config.stable.updated.json"
+      config_file: "configs/stable_build.json"
     secrets: inherit
 
   trigger_cleanup:
@@ -123,8 +198,28 @@ jobs:
 
   trigger_notify_failure:
     needs: [check_patch, build_beta, build_stable]
-    if: ${{ failure() }}
+    # `always()` is required, not stylistic: GitHub skips a job whose needed job was
+    # SKIPPED unless the condition begins with always(). A check_patch failure leaves
+    # both build jobs skipped, so a bare `failure()` never reached this job — the one
+    # failure that gates every build was the one that announced nothing (run
+    # 39261459573, killed by a typo'd config key in "Compile Base Configs").
+    #
+    # Each result is named explicitly rather than via contains(needs.*.result,
+    # 'failure'): at JOB level the wildcard is a long-standing runner bug
+    # (actions/runner#1540, open since 2021) — the job-level condition does not see the
+    # same values the identical expression shows at step level, so it can decide either
+    # way depending on the dependency graph. Run 39261459573 skipped this job with a bare
+    # failure(); 39263204435 skipped it with the wildcard while check_patch was in
+    # 'failure'. Naming every need is also the form this workflow already proves works:
+    # trigger_cleanup below uses always() && named results and runs on nights where one
+    # build is skipped and the other succeeded.
+    #
+    # Matching 'failure' rather than '!= success' keeps the ordinary quiet night
+    # silent: with nothing to build, build_beta ends 'skipped', which is not a failure,
+    # and a cancelled run is not news either.
+    if: ${{ always() && (needs.check_patch.result == 'failure' || needs.build_beta.result == 'failure' || needs.build_stable.result == 'failure') }}
     uses: ./.github/workflows/notify.yml
     with:
       workflow_name: "CI"
+      already_reported: ${{ needs.build_beta.outputs.reported_failures == 'true' || needs.build_stable.outputs.reported_failures == 'true' }}
     secrets: inherit

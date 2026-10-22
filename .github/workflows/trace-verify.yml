@@ -5,6 +5,12 @@ on:
     paths:
       - "scripts/build.sh"
       - "scripts/utils.sh"
+      # The APKMirror picker has its own test step below, so a change to only the
+      # python side of it must still run the suite (the bash mirror has to agree).
+      - "scripts/apkmirror_search.py"
+      # The Uptodown resolver takes the preferred-format chain as its own argument;
+      # test_preferred_format.sh asserts its class-collapse parity with utils.sh.
+      - "scripts/uptodown.py"
       - ".github/traces/**"
   workflow_dispatch:
 
@@ -27,5 +33,12 @@ jobs:
 
       - name: Run helper regression tests
         run: |
+          bash .github/traces/test_patch_versions.sh
           bash .github/traces/test_cache_helpers.sh
           bash .github/traces/test_bundle_helpers.sh
+          bash .github/traces/test_arch_strip.sh
+          bash .github/traces/test_apkmirror_variants.sh
+          bash .github/traces/test_preferred_format.sh
+          bash .github/traces/test_direct_source.sh
+          bash .github/traces/test_fdroid_source.sh
+          bash .github/traces/test_config_rearm.sh

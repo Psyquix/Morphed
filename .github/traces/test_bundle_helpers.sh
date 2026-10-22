@@ -53,4 +53,41 @@ touch -d "2020-01-01" "$apk_cache_dir/com.test-1.0-all.xapk"
 _cache_touch_apks 1.0 all
 [[ $(find "$apk_cache_dir/com.test-1.0-all.xapk" -newermt "2021-01-01") ]] || fail "touch bundle"
 
+# --- arch-honesty predicate + learned download-link index (docs/decisions/0007) ---
+python3 - <<'PY'
+import zipfile
+with zipfile.ZipFile('arm64only.xapk','w') as z:
+    z.writestr('base.apk','x'); z.writestr('config.arm64_v8a.apk','y'); z.writestr('config.hdpi.apk','z')
+with zipfile.ZipFile('noarch.apk','w') as z:
+    z.writestr('AndroidManifest.xml','x')
+PY
+
+# _artifact_abis reads config splits (a bundle has no top-level lib/ entry).
+_artifact_abis vendor.xapk | grep -qxF arm64-v8a || fail "vendor.xapk should read arm64-v8a"
+_abis_satisfies "arm64-v8a arm-v7a" arm-v7a || fail "abis_satisfies: list contains arch"
+_abis_satisfies "arm64-v8a" arm-v7a && fail "abis_satisfies: other single ABI must NOT satisfy"
+_abis_satisfies "" arm-v7a || fail "abis_satisfies: empty ABIs satisfy any arch (arch-agnostic)"
+_abis_satisfies "arm64-v8a" all || fail "abis_satisfies: catch-all arch satisfied by anything"
+
+_artifact_satisfies_arch arm64only.xapk arm64-v8a || fail "arm64 artifact satisfies arm64"
+_artifact_satisfies_arch arm64only.xapk arm-v7a && fail "arm64-only must NOT satisfy arm-v7a (this is the mislabel)"
+_artifact_satisfies_arch vendor.xapk arm-v7a || fail "universal must keep the 32-bit build"
+_artifact_satisfies_arch noarch.apk arm-v7a || fail "arch-agnostic apk satisfies any arch"
+
+# Learned link index: fetch-once-then-adopt, refuse-without-refetch only on evidence.
+export TEMP_DIR="$t/tmpidx"
+_dlurl_index_record "https://store/x?vc=20" arm64only.xapk
+[[ "$(_dlurl_index_lookup "https://store/x?vc=20" arm64-v8a)" == *.xapk ]] || fail "index adopts the right arch (no refetch)"
+[[ "$(_dlurl_index_lookup "https://store/x?vc=20" arm-v7a)" == "REJECT" ]] || fail "index rejects a wrong single ABI"
+# Negative control: an unknown link is fetched, never refused without evidence.
+[[ -z "$(_dlurl_index_lookup "https://store/never-fetched" arm-v7a)" ]] || fail "unknown link must NOT be refused"
+# A key whose blob vanished reads as unknown, not as a stale hit.
+_b=$(cut -f2 "${TEMP_DIR}/urlindex/keys/$(_dlurl_sha "https://store/x?vc=20")")
+rm -f "$_b"
+[[ -z "$(_dlurl_index_lookup "https://store/x?vc=20" arm64-v8a)" ]] || fail "stale blob must read as unknown"
+# A universal blob is adopted for either arch.
+_dlurl_index_record "https://store/uni?vc=20" vendor.xapk
+[[ "$(_dlurl_index_lookup "https://store/uni?vc=20" arm-v7a)" == *.xapk ]] || fail "universal adopt for arm-v7a"
+[[ "$(_dlurl_index_lookup "https://store/uni?vc=20" arm64-v8a)" == *.xapk ]] || fail "universal adopt for arm64"
+
 echo "BUNDLE HELPER TESTS: PASS"

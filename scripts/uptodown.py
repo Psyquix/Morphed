@@ -10,12 +10,109 @@ import json
 import urllib.request
 import urllib.parse
 
+try:
+    from curl_cffi import requests as cffi_requests
+except ImportError:
+    cffi_requests = None
+
 API_HOST = "www.uptodown.app"
 AUTH_PATH = "/eapi/auth/token"
 CLIENT_VERSION = "739"
 USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 16; Pixel 8 Pro Build/BP4A.260205.001)"
-WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 HMAC_KEY = b"MDGMXUMdvHJBG/vjdFgmqX6LUdy7ecfwvYNd0gyfOCs="
+
+TRANSIENT_STATUS_CODES = {403, 410, 429, 500, 502, 503, 504}
+
+
+def fetch_web_page(url: str, retries: int = 3, timeout: int = 15) -> str:
+    headers = {"User-Agent": WEB_USER_AGENT}
+    last_err = None
+    for attempt in range(retries):
+        try:
+            if cffi_requests:
+                resp = cffi_requests.get(url, headers=headers, impersonate="chrome", timeout=timeout)
+                if resp.status_code == 200:
+                    return resp.text
+                if resp.status_code in TRANSIENT_STATUS_CODES and attempt < retries - 1:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                resp.raise_for_status()
+                return resp.text
+            else:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return resp.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise last_err
+    return ""
+
+
+def fetch_json(url: str, headers: dict = None, retries: int = 3, timeout: int = 15) -> dict:
+    if headers is None:
+        headers = {"User-Agent": WEB_USER_AGENT}
+    last_err = None
+    for attempt in range(retries):
+        try:
+            if cffi_requests:
+                kwargs = {"headers": headers, "timeout": timeout}
+                if "uptodown.app" not in url:
+                    kwargs["impersonate"] = "chrome"
+                resp = cffi_requests.get(url, **kwargs)
+                if resp.status_code == 200:
+                    return resp.json()
+                if resp.status_code in TRANSIENT_STATUS_CODES and attempt < retries - 1:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            else:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise last_err
+    return {}
+
+
+def post_json(url: str, data: dict, headers: dict = None, retries: int = 3, timeout: int = 15) -> dict:
+    headers = headers or {}
+    last_err = None
+    for attempt in range(retries):
+        try:
+            if cffi_requests:
+                kwargs = {"headers": headers, "timeout": timeout, "data": data}
+                if "uptodown.app" not in url:
+                    kwargs["impersonate"] = "chrome"
+                resp = cffi_requests.post(url, **kwargs)
+                if resp.status_code == 200:
+                    return resp.json()
+                if resp.status_code in TRANSIENT_STATUS_CODES and attempt < retries - 1:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            else:
+                body = urllib.parse.urlencode(data).encode("utf-8")
+                req = urllib.request.Request(url, data=body, headers=headers)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise last_err
+    return {}
+
 
 def get_auth_token() -> str:
     identifier = secrets.token_hex(8)
@@ -23,51 +120,46 @@ def get_auth_token() -> str:
     sig = hmac.new(HMAC_KEY, ts.encode("utf-8"), hashlib.sha256).hexdigest()
 
     params = {"identifier": identifier}
-    body = urllib.parse.urlencode({
+    body = {
         "identifier": identifier,
         "id_plataforma": "13",
         "lang": "en",
         "unixtime": ts,
         "hmac": sig
-    }).encode("utf-8")
+    }
 
-    req = urllib.request.Request(
-        f"https://{API_HOST}{AUTH_PATH}?{urllib.parse.urlencode(params)}",
-        data=body,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Identificador": "Uptodown_Android",
-            "Identificador-Version": CLIENT_VERSION,
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
-    )
+    url = f"https://{API_HOST}{AUTH_PATH}?{urllib.parse.urlencode(params)}"
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Identificador": "Uptodown_Android",
+        "Identificador-Version": CLIENT_VERSION,
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
 
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        token = data.get("token")
-        if not token:
-            raise RuntimeError(f"Failed to get auth token: {data}")
-        return token
+    data = post_json(url, data=body, headers=headers)
+    token = data.get("token")
+    if not token:
+        raise RuntimeError(f"Failed to get auth token: {data}")
+    return token
+
 
 def get_cdn_download_url(app_id: str, file_id: str, token: str = None) -> str:
     if not token:
         token = get_auth_token()
 
-    req = urllib.request.Request(
-        f"https://{API_HOST}/eapi/apps/{app_id}/file/{file_id}/downloadUrl",
-        headers={
-            "User-Agent": USER_AGENT,
-            "Identificador": "Uptodown_Android",
-            "Identificador-Version": CLIENT_VERSION,
-            "Authorization": f"Bearer {token}"
-        }
-    )
+    url = f"https://{API_HOST}/eapi/apps/{app_id}/file/{file_id}/downloadUrl"
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Identificador": "Uptodown_Android",
+        "Identificador-Version": CLIENT_VERSION,
+        "Authorization": f"Bearer {token}"
+    }
 
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        if data.get("success") != 1 or "data" not in data or "downloadURL" not in data["data"]:
-            raise RuntimeError(f"Failed to get download URL: {data}")
-        return data["data"]["downloadURL"]
+    data = fetch_json(url, headers=headers)
+    if data.get("success") != 1 or "data" not in data or "downloadURL" not in data["data"]:
+        raise RuntimeError(f"Failed to get download URL: {data}")
+    return data["data"]["downloadURL"]
+
 
 def clean_page_url(raw_url: str) -> str:
     url = raw_url.rstrip("/")
@@ -76,10 +168,6 @@ def clean_page_url(raw_url: str) -> str:
             url = url[:-len(sfx)]
     return url
 
-def fetch_web_page(url: str) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": WEB_USER_AGENT})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return resp.read().decode("utf-8", errors="ignore")
 
 def extract_app_id(html: str) -> str | None:
     # 1. From h1#detail-app-name data-code
@@ -100,6 +188,7 @@ def extract_app_id(html: str) -> str | None:
         return m.group(1)
     return None
 
+
 def extract_package_name(html: str) -> str | None:
     # 1. From Google Play link
     m = re.search(r'play\.google\.com/store/apps/details\?id=([a-zA-Z0-9_.]+)', html)
@@ -112,6 +201,7 @@ def extract_package_name(html: str) -> str | None:
         if pkg:
             return pkg
     return None
+
 
 def get_versions(base_url: str, allow_all: bool = False) -> list[str]:
     clean_url = clean_page_url(base_url)
@@ -133,27 +223,39 @@ def get_versions(base_url: str, allow_all: bool = False) -> list[str]:
     for page in range(1, 6):
         try:
             api_url = f"{clean_url}/apps/{app_id}/versions/{page}"
-            req = urllib.request.Request(api_url, headers={"User-Agent": WEB_USER_AGENT})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                items = data.get("data", [])
-                if not items:
-                    break
-                for it in items:
-                    v = str(it.get("version", "")).strip()
-                    if not v:
-                        continue
-                    if not allow_all and any(kw in v.lower() for kw in ("beta", "alpha", "secondary")):
-                        continue
-                    if v not in seen:
-                        seen.add(v)
-                        versions.append(v)
+            data = fetch_json(api_url)
+            items = data.get("data", [])
+            if not items:
+                break
+            for it in items:
+                v = str(it.get("version", "")).strip()
+                if not v:
+                    continue
+                if not allow_all and any(kw in v.lower() for kw in ("beta", "alpha", "secondary")):
+                    continue
+                if v not in seen:
+                    seen.add(v)
+                    versions.append(v)
         except Exception:
-            break
+            continue
 
     return versions
 
-def resolve_download_variant(base_url: str, version: str, arch: str = "") -> tuple[str, str, bool]:
+
+def _fmt_class(token: str) -> str:
+    """preferred-format token -> the only two classes an Uptodown row can show:
+    a row is xapk-flagged or it is not. Mirrors _pref_class_order in utils.sh."""
+    return "apk" if token == "apk" else "bundle"
+
+
+def _preferred_class(prefer_formats: str) -> str | None:
+    """First class named by the (space-delimited) preferred-format chain, or None
+    when unset — unset keeps the historical arch-specific-over-universal pick."""
+    toks = (prefer_formats or "").split()
+    return _fmt_class(toks[0]) if toks else None
+
+
+def resolve_download_variant(base_url: str, version: str, arch: str = "", prefer_formats: str = "") -> tuple[str, str, bool]:
     """Returns (app_id, file_id, is_bundle)"""
     clean_url = clean_page_url(base_url)
     main_html = fetch_web_page(clean_url)
@@ -172,21 +274,19 @@ def resolve_download_variant(base_url: str, version: str, arch: str = "") -> tup
     for page in range(1, 15):
         try:
             api_url = f"{clean_url}/apps/{app_id}/versions/{page}"
-            req = urllib.request.Request(api_url, headers={"User-Agent": WEB_USER_AGENT})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                items = data.get("data", [])
-                if not items:
+            data = fetch_json(api_url)
+            items = data.get("data", [])
+            if not items:
+                break
+            for it in items:
+                it_v = str(it.get("version", "")).strip()
+                if it_v == target_ver or it_v == target_clean_ver or it_v.startswith(target_clean_ver):
+                    matched_item = it
                     break
-                for it in items:
-                    it_v = str(it.get("version", "")).strip()
-                    if it_v == target_ver or it_v == target_clean_ver or it_v.startswith(target_clean_ver):
-                        matched_item = it
-                        break
-                if matched_item:
-                    break
+            if matched_item:
+                break
         except Exception:
-            break
+            continue
 
     if not matched_item:
         raise RuntimeError(f"Version '{version}' not found on Uptodown for {clean_url}")
@@ -208,41 +308,52 @@ def resolve_download_variant(base_url: str, version: str, arch: str = "") -> tup
         if m_var:
             data_version = m_var.group(1)
             files_url = f"{clean_url.rsplit('/', 1)[0]}/app/{app_id}/version/{data_version}/files"
-            req = urllib.request.Request(files_url, headers={"User-Agent": WEB_USER_AGENT})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                files_data = json.loads(resp.read().decode("utf-8"))
-                content = files_data.get("content", "")
-                if content:
-                    # Parse variants: <p>arch</p> followed by <div class="variant">...<img ... data-file-id="...">
-                    # Split content by <p>
-                    sections = re.split(r'<p[^>]*>', content)
-                    specific_file_id = None
-                    universal_file_id = None
+            files_data = fetch_json(files_url)
+            content = files_data.get("content", "")
+            if content:
+                # Parse variants: <p>arch</p> followed by <div class="variant">...<img ... data-file-id="...">
+                sections = re.split(r'<p[^>]*>', content)
+                specific_file_id = None
+                universal_file_id = None
 
-                    for sec in sections[1:]:
-                        arch_m = re.match(r'([^<]+)</p>', sec.strip())
-                        node_arch = arch_m.group(1).strip().lower() if arch_m else ""
-                        fid_m = re.search(r'data-file-id="([0-9]+)"', sec)
-                        if not fid_m:
-                            continue
-                        cur_fid = fid_m.group(1)
-                        is_xapk = ('title="xapk"' in sec or 'class="xapk"' in sec)
+                for sec in sections[1:]:
+                    arch_m = re.match(r'([^<]+)</p>', sec.strip())
+                    node_arch = arch_m.group(1).strip().lower() if arch_m else ""
+                    fid_m = re.search(r'data-file-id="([0-9]+)"', sec)
+                    if not fid_m:
+                        continue
+                    cur_fid = fid_m.group(1)
+                    is_xapk = ('title="xapk"' in sec or 'class="xapk"' in sec)
 
-                        if arch and (arch in node_arch):
+                    if arch and (arch in node_arch):
+                        if specific_file_id is None and not prefer_formats:
                             specific_file_id = (cur_fid, is_xapk)
                             break
-                        elif any(u in node_arch for u in ("universal", "arm64-v8a, armeabi-v7a", "noarch")):
-                            if not universal_file_id:
-                                universal_file_id = (cur_fid, is_xapk)
+                        specific_file_id = (cur_fid, is_xapk)
+                    elif any(u in node_arch for u in ("universal", "arm64-v8a, armeabi-v7a", "noarch")):
+                        if not universal_file_id:
+                            universal_file_id = (cur_fid, is_xapk)
 
-                    if specific_file_id:
-                        file_id, is_bundle = specific_file_id
-                    elif universal_file_id:
-                        file_id, is_bundle = universal_file_id
+                # Without a chain the historical pick stands: the row labelled for this
+                # arch, the universal row only as its fallback. With one, the chain's
+                # class wins across the two rows — but ONLY across the arch axis: which
+                # ABIs a row carries is never traded for a format (ADR 0007 says nothing
+                # here, the store simply labels rows), and kindFile still decides the
+                # final extension. The key picks rows, it does not relabel bytes.
+                pref = _preferred_class(prefer_formats)
+                if pref is None:
+                    chosen = specific_file_id or universal_file_id
+                else:
+                    ranked = [c for c in (specific_file_id, universal_file_id) if c]
+                    preferred_rows = [c for c in ranked if ("bundle" if c[1] else "apk") == pref]
+                    chosen = preferred_rows[0] if preferred_rows else (ranked[0] if ranked else None)
+                if chosen:
+                    file_id, is_bundle = chosen
     except Exception:
         pass
 
     return app_id, file_id, is_bundle
+
 
 def download_file(base_url: str, version: str, dest_path: str, arch: str = "") -> bool:
     app_id, file_id, is_bundle = resolve_download_variant(base_url, version, arch)
@@ -272,6 +383,7 @@ def download_file(base_url: str, version: str, dest_path: str, arch: str = "") -
 
     return False
 
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(1)
@@ -297,7 +409,6 @@ def main():
         html = fetch_web_page(clean_url)
         pkg = extract_package_name(html)
         if not pkg:
-            # Check /download page
             try:
                 dl_html = fetch_web_page(f"{clean_url}/download")
                 pkg = extract_package_name(dl_html)
@@ -314,7 +425,8 @@ def main():
         url = sys.argv[2]
         version = sys.argv[3]
         arch = sys.argv[4] if len(sys.argv) > 4 else ""
-        app_id, file_id, is_bundle = resolve_download_variant(url, version, arch)
+        prefer = sys.argv[5] if len(sys.argv) > 5 else ""
+        app_id, file_id, is_bundle = resolve_download_variant(url, version, arch, prefer)
         token = get_auth_token()
         cdn_url = get_cdn_download_url(app_id, file_id, token)
         print(f"{cdn_url}\t{str(is_bundle).lower()}")
@@ -331,6 +443,7 @@ def main():
         sys.exit(0 if success else 1)
 
     sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

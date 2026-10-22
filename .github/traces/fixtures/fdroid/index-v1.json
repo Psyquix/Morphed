@@ -1,0 +1,61 @@
+{
+    "repo": {
+        "name": "Example Repo",
+        "address": "https://example.net/fdroid/repo"
+    },
+    "apps": [
+        {
+            "packageName": "com.example.app",
+            "name": "Example",
+            "suggestedVersionCode": 212
+        }
+    ],
+    "packages": {
+        "com.example.app": [
+            {
+                "versionName": "2.1.2",
+                "versionCode": 212,
+                "apkName": "com.example.app_212.apk",
+                "hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "size": 1048576,
+                "nativecode": [
+                    "arm64-v8a",
+                    "armeabi-v7a",
+                    "x86_64",
+                    "x86"
+                ],
+                "minSdkVersion": 21,
+                "targetSdkVersion": 35
+            },
+            {
+                "versionName": "2.1.1",
+                "versionCode": 211,
+                "apkName": "com.example.app_quirk_211.apk",
+                "hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "size": 1048576,
+                "nativecode": [
+                    "arm64-v8a"
+                ],
+                "minSdkVersion": 21
+            },
+            {
+                "versionName": "2.0.0",
+                "versionCode": 200,
+                "apkName": "com.example.app_200.apk",
+                "hash": "2222222222222222222222222222222222222222222222222222222222222222",
+                "size": 1048576,
+                "minSdkVersion": 19
+            }
+        ],
+        "com.example.x86only": [
+            {
+                "versionName": "9.9",
+                "versionCode": 909,
+                "apkName": "com.example.x86only_909.apk",
+                "nativecode": [
+                    "x86"
+                ]
+            }
+        ]
+    }
+}

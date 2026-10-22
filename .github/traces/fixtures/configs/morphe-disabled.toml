@@ -1,0 +1,10 @@
+patches-source = "MorpheApp/morphe-patches"
+patches-version = "stable"
+brand = "disabled"
+
+[OfflineGames-Disabled]
+enabled = true
+pkg-name = "com.example.disabled"
+app-name = "Offline Games"
+version = "auto"
+included-patches = "'House ad only' 'Fast startup'"

@@ -1,10 +1,13 @@
 """Filename and catalog-name conventions — single source of truth.
 
 Shared by .github/scripts/build_make_manifest.py and backfill_manifests.py.
-IMPORTANT: the website repo's .github/scripts/rebuild_catalog.py carries a
-copy of these functions (it must stay dependency-free). If you change them
-here, change them there in the same series of commits — divergence here is
-the silent bug class the manifest architecture exists to prevent.
+IMPORTANT: this module is the one definition of those rules in the system. The
+website's .github/scripts/rebuild_catalog.py imports this file at rebuild time (via a
+sparse clone of main; see RVB_NAMING_DIR there) rather than keeping a copy, so a
+change here takes effect on the site at the next catalogue rebuild and nowhere needs
+to be "changed in both repos". Do not reintroduce a mirror: divergence between
+builder and website parsing is the silent bug class the manifest architecture exists
+to prevent. Keep this module stdlib-only so it stays importable from anywhere.
 
 Manifest schema v1 (per-release build.json asset): see build_make_manifest.py.
 """
@@ -15,6 +18,10 @@ _ARCH_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 _FILE_PREFIX_RE = re.compile(r"^(.*?)-(?:v[0-9]|module-)", re.IGNORECASE)
+# The version segment sits between the `-v`/`-module-v` marker and the trailing
+# arch token; require a digit after `v` so a `-v` inside the prefix (e.g. the
+# `-vpn` of `proton-vpn-...`) is never mistaken for the version start.
+_VERSION_RE = re.compile(r"-(?:module-)?v(\d.*)$", re.IGNORECASE)
 
 
 def normalize_key(s):
@@ -47,11 +54,13 @@ def extract_arch(fname, version=""):
         return match.group(1)
     if version:
         clean_ver = re.escape(version.lstrip("v"))
-        m = re.search(rf"-v?{clean_ver}-([a-zA-Z0-9_-]+?)(?:-(?:apk|module))?\.(?:apk|zip)$", fname, re.IGNORECASE)
+        m = re.search(
+            rf"-v?{clean_ver}-([a-zA-Z0-9_-]+?)(?:-(?:apk|module))?\.(?:apk|zip)$", fname, re.IGNORECASE)
         if m:
             return m.group(1)
     name_no_ext = re.sub(r"\.(?:apk|zip)$", "", fname, flags=re.IGNORECASE)
-    name_no_mode = re.sub(r"-(?:apk|module)$", "", name_no_ext, flags=re.IGNORECASE)
+    name_no_mode = re.sub(r"-(?:apk|module)$", "",
+                          name_no_ext, flags=re.IGNORECASE)
     parts = name_no_mode.split("-")
     if len(parts) > 1:
         return parts[-1]
@@ -68,6 +77,27 @@ def file_prefix(fname):
     return m.group(1) if m else fname.rsplit(".", 1)[0]
 
 
+def extract_version(fname, hint=""):
+    """App version token (no leading `v`) embedded in a build artifact filename.
+
+    `inshorts-bholeykabhakt-v6.12.18-arm64-v8a.apk` -> `6.12.18`; a module
+    `youtube-revanced-module-v19.16.39-arm64.zip` -> `19.16.39`. The filename is
+    the authoritative per-arch version: a single build can publish arm64 at one
+    version and arm at a fallback version, so callers must not trust a
+    collapsed scalar. Strips the trailing arch+extension, then takes what
+    follows the last `-v`/`-module-v` marker whose `v` is followed by a digit.
+    Returns `hint` (leading `v` stripped) when the name carries no parseable
+    version, else the empty string.
+    """
+    m = _ARCH_TOKEN_RE.search(fname)
+    stem = fname[:m.start()] if m else re.sub(
+        r"\.(?:apk|zip)$", "", fname, flags=re.IGNORECASE)
+    mv = _VERSION_RE.search(stem)
+    if mv:
+        return mv.group(1)
+    return (hint or "").lstrip("v")
+
+
 def parse_patch_info(patches_source, patches_ref):
     """Derive (brand_key, brand_name) from the patch source repo, mirroring
     the old update_website_catalog.py behavior (owner-ish token after stripping
@@ -76,9 +106,12 @@ def parse_patch_info(patches_source, patches_ref):
     if not primary and patches_ref:
         primary = patches_ref.split()[0].split("/")[0]
 
-    primary_clean = primary.split("/")[-1].replace("-patches", "").replace("patches-", "")
-    primary_clean = primary_clean.split("-")[0] if "-" in primary_clean else primary_clean
-    primary_clean = primary_clean.capitalize() if primary_clean.islower() else primary_clean
+    primary_clean = primary.split(
+        "/")[-1].replace("-patches", "").replace("patches-", "")
+    primary_clean = primary_clean.split(
+        "-")[0] if "-" in primary_clean else primary_clean
+    primary_clean = primary_clean.capitalize(
+    ) if primary_clean.islower() else primary_clean
 
     key = normalize_key(primary_clean) or "patched"
     name = primary_clean or "Patched"

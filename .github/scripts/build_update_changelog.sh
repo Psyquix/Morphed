@@ -36,11 +36,19 @@ get_update_json() {
 }
 
 cd build || { echo "build folder not found"; exit 1; }
+# Staging list for the auto-commit step (file_pattern can't enumerate dynamic
+# subdirectory paths); consumed by build.yml as a multiline git add argument.
+: > ../.updated_pointers
 for OUTPUT in *module*.zip; do
   [ "$OUTPUT" = "*module*.zip" ] && continue
   ZIP_S=$(unzip -p "$OUTPUT" module.prop)
   if ! UPDATE_JSON=$(echo "$ZIP_S" | grep updateJson); then continue; fi
-  UPDATE_JSON="${UPDATE_JSON##*/}"
+  # The baked URL is the one true path (<branch>/update/<channel>/<name>.json);
+  # mirror it verbatim so the branch layout can never drift from what modules
+  # poll (see update_json_path in scripts/utils.sh).
+  UPDATE_JSON="${UPDATE_JSON#*/update/}"
+  mkdir -p "../$(dirname "$UPDATE_JSON")"
+  echo "$UPDATE_JSON" >> ../.updated_pointers
   VER=$(echo "$ZIP_S" | grep version=)
   VER="${VER##*=}"
   DLURL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$ARCHIVE_TAG/${OUTPUT}"
