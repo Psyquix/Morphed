@@ -383,10 +383,12 @@ it and `embeds: 0` with it, read back from the created message via `?wait=true`)
 things the flag does not cover, and neither has a sender-side switch: a `discord.gg`
 invite is rendered as a server-invitation **component** rather than a link embed, and
 `[label](<url>)` — the documented text form that stops ordinary unfurls — does not stop
-that either (measured: the card survived both). So the mirror unwraps every link target to
-the `<url>` form and then **drops the target of an invite link entirely**, keeping the
-word: a join link is worth nothing to a reader already in the server. No notifier body
-writes a bare URL, so that one pass covers every sink.
+that either (measured: the card survived both). So the mirror **repoints an invite link**
+to the broadcast channel instead: `[Channel](https://t.me/s/<handle>)`, the URL derived
+from `TG_CHAT_ID_BROADCAST` rather than written out a second time, with the footer's own
+💬 replaced by the 📣 the channel uses everywhere else. A join link is worth nothing to a
+reader already in the server; on Telegram and in the GitHub release body the footer keeps
+the invite. No notifier body writes a bare URL, so that one pass covers every sink.
 
 ### Where a message ends (`notify_pack.sh`)
 

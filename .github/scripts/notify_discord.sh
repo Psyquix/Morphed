@@ -71,19 +71,48 @@ discord_hide_link_targets() {
 	LC_ALL=C sed -e 's|\](\([^<)][^)]*\))|](<\1>)|g'
 }
 
-# discord_drop_invite_links — turn [label](invite-url) back into plain label text.
-# Neither of the two suppression mechanisms reaches a server invite: flags:4 covers link
-# *embeds* and angle brackets cover ordinary unfurls, but Discord renders an invite as an
-# invitation **component** (verified — the DevSpace card survived both measures in the
-# release footer), and there is no sender-side switch for it. Inside Discord the link is
-# also worth nothing to a reader who is already in the server, so the mirror keeps the
-# word and drops the target. Handles the wrapped and the bare form because it runs on
-# already-wrapped text. Delimited with % because the pattern is full of | (host
-# alternatives) and / (URL paths), either of which would end the s command early.
-discord_drop_invite_links() {
+# discord_invite_target — what an invite link becomes in the mirrored copy, echoed as a
+# ready markdown link, or nothing when it cannot be answered.
+# A discord.gg invite is the one unfurl neither mechanism stops: flags:4 covers link
+# *embeds*, angle brackets cover ordinary unfurls, and Discord renders an invite as a
+# server-invitation component with no sender-side switch (measured — the card survived
+# both). The release footer's link is also useless to a reader already in the server, so
+# it is pointed at the broadcast channel instead, which is the same thing the Telegram
+# footer's 📣 Channel entry is. The target is emitted without a leading emoji: the
+# footer's own mark is rewritten to match (see discord_replace_invite_links).
+#
+# The URL is derived from TG_CHAT_ID_BROADCAST rather than written out again here: that
+# variable already names the channel, and a second copy of a handle is a second thing to
+# forget when it is renamed. The wire forms differ on purpose (@handle for the Bot API,
+# t.me/s/<handle> for a browser), which is why the derivation lives at the point of use.
+discord_invite_target() {
+	local handle=${TG_CHAT_ID_BROADCAST:-}
+	if [ -z "$handle" ]; then
+		return 0
+	fi
+	handle=${handle#@}
+	printf '[Channel](<https://t.me/s/%s>)' "$handle"
+}
+
+# discord_replace_invite_links [replacement] — rewrite every invite link (wrapped or
+# bare) to <replacement>; with no replacement given, keep the label and drop the target.
+# The speech bubble the release footer hangs on its Discord entry is swapped for the
+# megaphone that labels the channel everywhere else, because only the link itself is
+# inside the match — leaving it would produce "💬 📣 Channel".
+# Delimited with % because the pattern is full of | (host alternatives) and / (URL
+# paths), either of which would end the s command early.
+discord_replace_invite_links() {
+	local rep=${1:-}
+	if [ -z "$rep" ]; then
+		LC_ALL=C sed -E \
+			-e 's%\[([^]]*)\]\(<https?://(discord\.gg|discord\.com/invite|discordapp\.com/invite)/[^)]*>\)%\1%g' \
+			-e 's%\[([^]]*)\]\(https?://(discord\.gg|discord\.com/invite|discordapp\.com/invite)/[^)]*\)%\1%g'
+		return
+	fi
 	LC_ALL=C sed -E \
-		-e 's%\[([^]]*)\]\(<https?://(discord\.gg|discord\.com/invite|discordapp\.com/invite)/[^)]*>\)%\1%g' \
-		-e 's%\[([^]]*)\]\(https?://(discord\.gg|discord\.com/invite|discordapp\.com/invite)/[^)]*\)%\1%g'
+		-e "s%\[[^]]*\]\(<https?://(discord\.gg|discord\.com/invite|discordapp\.com/invite)/[^)]*>\)%$rep%g" \
+		-e "s%\[[^]]*\]\(https?://(discord\.gg|discord\.com/invite|discordapp\.com/invite)/[^)]*\)%$rep%g" \
+		-e 's%💬 \[Channel\]%📣 [Channel]%g'
 }
 
 # _pack_len_units <text> — set _PACK_LEN to the UTF-16 code-unit length of <text>, the
@@ -208,8 +237,10 @@ discord_send() {
 	# Angle-bracket the link targets after conversion: the converters create [label](url)
 	# from <a href>, and the packer below counts the result, so the wrapping has to be
 	# priced into the message length rather than added afterwards. Invites are then
-	# unlinked, which only shortens the text.
-	text=$(discord_hide_link_targets <<<"$text" | discord_drop_invite_links)
+	# repointed, which only changes the length by a few characters.
+	local invite_target
+	invite_target=$(discord_invite_target)
+	text=$(discord_hide_link_targets <<<"$text" | discord_replace_invite_links "$invite_target")
 
 	# Same packer the Telegram sites use, so the mirror's boundaries match theirs:
 	# whole blocks only, and a heading travels with the block under it. The heading
