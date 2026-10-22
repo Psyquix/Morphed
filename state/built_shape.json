@@ -1,4 +1,286 @@
 {
-  "stable": {},
-  "beta": {}
+  "stable": {
+    "YouTube-Morphe": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "app-name": "YouTube",
+        "pkg-name": "com.google.android.youtube",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "YouTubeMusic-Morphe": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "app-name": "YouTube Music",
+        "pkg-name": "com.google.android.apps.youtube.music",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "YouTube-Morphe-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "variant": "Experimental",
+        "app-name": "YouTube",
+        "pkg-name": "com.google.android.youtube",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    },
+    "YouTubeMusic-Morphe-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "variant": "Experimental",
+        "app-name": "YouTube Music",
+        "pkg-name": "com.google.android.apps.youtube.music",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    },
+    "Reddit-Morphe-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "variant": "Experimental",
+        "app-name": "Reddit",
+        "pkg-name": "com.reddit.frontpage",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    },
+    "Reddit-Morphe": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "app-name": "Reddit",
+        "pkg-name": "com.reddit.frontpage",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "Twitter-Piko": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "crimera/piko",
+        "brand": "Piko",
+        "app-name": "Twitter",
+        "pkg-name": "com.twitter.android",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "Twitter-Piko-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "crimera/piko",
+        "brand": "Piko",
+        "variant": "Experimental",
+        "app-name": "Twitter",
+        "pkg-name": "com.twitter.android",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    },
+    "TikTok-hushfeed": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "SysAdminDoc/hushfeed",
+        "brand": "hushfeed",
+        "app-name": "TikTok",
+        "pkg-name": "com.zhiliaoapp.musically",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "TikTok-hushfeed-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "SysAdminDoc/hushfeed",
+        "brand": "hushfeed",
+        "variant": "Experimental",
+        "app-name": "TikTok",
+        "pkg-name": "com.zhiliaoapp.musically",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    }
+  },
+  "beta": {
+    "YouTube-Morphe": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "app-name": "YouTube",
+        "pkg-name": "com.google.android.youtube",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "YouTubeMusic-Morphe": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "app-name": "YouTube Music",
+        "pkg-name": "com.google.android.apps.youtube.music",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "YouTube-Morphe-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "variant": "Experimental",
+        "app-name": "YouTube",
+        "pkg-name": "com.google.android.youtube",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    },
+    "YouTubeMusic-Morphe-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "variant": "Experimental",
+        "app-name": "YouTube Music",
+        "pkg-name": "com.google.android.apps.youtube.music",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    },
+    "Reddit-Morphe-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "variant": "Experimental",
+        "app-name": "Reddit",
+        "pkg-name": "com.reddit.frontpage",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    },
+    "Reddit-Morphe": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "MorpheApp/morphe-patches",
+        "brand": "Morphe",
+        "app-name": "Reddit",
+        "pkg-name": "com.reddit.frontpage",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "Twitter-Piko": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "crimera/piko",
+        "brand": "Piko",
+        "app-name": "Twitter",
+        "pkg-name": "com.twitter.android",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "Twitter-Piko-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "crimera/piko",
+        "brand": "Piko",
+        "variant": "Experimental",
+        "app-name": "Twitter",
+        "pkg-name": "com.twitter.android",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    },
+    "TikTok-hushfeed": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "SysAdminDoc/hushfeed",
+        "brand": "hushfeed",
+        "app-name": "TikTok",
+        "pkg-name": "com.zhiliaoapp.musically",
+        "arch": "arm64-v8a",
+        "build-mode": "apk"
+      }
+    },
+    "TikTok-hushfeed-Experimental": {
+      "arches": [
+        "arm64-v8a"
+      ],
+      "cfg": {
+        "patches-source": "SysAdminDoc/hushfeed",
+        "brand": "hushfeed",
+        "variant": "Experimental",
+        "app-name": "TikTok",
+        "pkg-name": "com.zhiliaoapp.musically",
+        "arch": "arm64-v8a",
+        "build-mode": "apk",
+        "version": "exp"
+      }
+    }
+  }
 }

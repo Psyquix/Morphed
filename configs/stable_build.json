@@ -96,32 +96,33 @@
   "Twitter-Piko": {
     "patches-source": "crimera/piko",
     "build-mode": "apk",
+    "arch": "arm64-v8a",
     "brand": "Piko",
-    "enabled": false,
+    "enabled": true,
     "pkg-name": "com.twitter.android",
     "app-name": "Twitter",
     "apkmirror-dlurl": "https://www.apkmirror.com/apk/x-corp/twitter",
     "uptodown-dlurl": "https://twitter.en.uptodown.com/android",
-    "apkpure-dlurl": "https://apkpure.com/x-formerly-twitter/com.twitter.android",
-    "arch": "arm64-v8a"
+    "apkpure-dlurl": "https://apkpure.com/x-formerly-twitter/com.twitter.android"
   },
   "Twitter-Piko-Experimental": {
     "patches-source": "crimera/piko",
     "build-mode": "apk",
+    "arch": "arm64-v8a",
     "brand": "Piko",
-    "enabled": false,
+    "enabled": true,
     "pkg-name": "com.twitter.android",
     "app-name": "Twitter",
     "variant": "Experimental",
     "version": "exp",
     "apkmirror-dlurl": "https://www.apkmirror.com/apk/x-corp/twitter",
     "uptodown-dlurl": "https://twitter.en.uptodown.com/android",
-    "apkpure-dlurl": "https://apkpure.com/x-formerly-twitter/com.twitter.android",
-    "arch": "arm64-v8a"
+    "apkpure-dlurl": "https://apkpure.com/x-formerly-twitter/com.twitter.android"
   },
   "TikTok-hushfeed": {
     "build-mode": "apk",
-    "enabled": false,
+    "arch": "arm64-v8a",
+    "enabled": true,
     "pkg-name": "com.zhiliaoapp.musically",
     "app-name": "TikTok",
     "patches-source": "SysAdminDoc/hushfeed",
@@ -129,12 +130,12 @@
     "apkmirror-dlurl": "https://www.apkmirror.com/apk/tiktok-pte-ltd/tik-tok-including-musical-ly",
     "uptodown-dlurl": "https://tiktok.en.uptodown.com/android",
     "apkpure-dlurl": "https://apkpure.com/tiktok-app/com.zhiliaoapp.musically",
-    "apkcombo-dlurl": "https://apkcombo.com/tiktok-videos-shop-live/com.zhiliaoapp.musically",
-    "arch": "arm64-v8a"
+    "apkcombo-dlurl": "https://apkcombo.com/tiktok-videos-shop-live/com.zhiliaoapp.musically"
   },
   "TikTok-hushfeed-Experimental": {
     "build-mode": "apk",
-    "enabled": false,
+    "arch": "arm64-v8a",
+    "enabled": true,
     "pkg-name": "com.zhiliaoapp.musically",
     "app-name": "TikTok",
     "variant": "Experimental",
@@ -144,7 +145,6 @@
     "apkmirror-dlurl": "https://www.apkmirror.com/apk/tiktok-pte-ltd/tik-tok-including-musical-ly",
     "uptodown-dlurl": "https://tiktok.en.uptodown.com/android",
     "apkpure-dlurl": "https://apkpure.com/tiktok-app/com.zhiliaoapp.musically",
-    "apkcombo-dlurl": "https://apkcombo.com/tiktok-videos-shop-live/com.zhiliaoapp.musically",
-    "arch": "arm64-v8a"
+    "apkcombo-dlurl": "https://apkcombo.com/tiktok-videos-shop-live/com.zhiliaoapp.musically"
   }
 }

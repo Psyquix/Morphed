@@ -1,1 +1,62 @@
-{}
+{
+  "Reddit-Morphe": {
+    "keys": [
+      "Reddit-Morphe"
+    ],
+    "version": "2026.42.0"
+  },
+  "Reddit-Morphe-Experimental": {
+    "keys": [
+      "Reddit-Morphe-Experimental"
+    ],
+    "version": "2026.42.0"
+  },
+  "TikTok-hushfeed": {
+    "keys": [
+      "TikTok-hushfeed"
+    ],
+    "version": "47.5.3"
+  },
+  "TikTok-hushfeed-Experimental": {
+    "keys": [
+      "TikTok-hushfeed-Experimental"
+    ],
+    "version": "47.5.3"
+  },
+  "Twitter-Piko": {
+    "keys": [
+      "Twitter-Piko"
+    ],
+    "version": "12.36.1-prod.01"
+  },
+  "Twitter-Piko-Experimental": {
+    "keys": [
+      "Twitter-Piko-Experimental"
+    ],
+    "version": "12.36.1-prod.01"
+  },
+  "YouTube-Morphe": {
+    "keys": [
+      "YouTube-Morphe"
+    ],
+    "version": "21.42.243"
+  },
+  "YouTube-Morphe-Experimental": {
+    "keys": [
+      "YouTube-Morphe-Experimental"
+    ],
+    "version": "21.42.243"
+  },
+  "YouTubeMusic-Morphe": {
+    "keys": [
+      "YouTubeMusic-Morphe"
+    ],
+    "version": "9.42.52"
+  },
+  "YouTubeMusic-Morphe-Experimental": {
+    "keys": [
+      "YouTubeMusic-Morphe-Experimental"
+    ],
+    "version": "9.42.52"
+  }
+}
