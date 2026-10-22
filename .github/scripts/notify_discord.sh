@@ -213,6 +213,13 @@ discord_send() {
 		echo "Nothing to mirror to Discord."
 		return 0
 	fi
-	echo "Mirrored ${posts} message(s) to Discord."
+	# Say what actually happened: counting a rejected post as mirrored makes a failed
+	# mirror look fine in a log nobody re-reads, which is how a broken converter sat
+	# unnoticed in a channel for a whole build.
+	if [ "$rc" = 0 ]; then
+		echo "Mirrored ${posts} message(s) to Discord."
+	else
+		echo "Discord mirror incomplete: ${posts} message(s) attempted, at least one rejected." >&2
+	fi
 	return "$rc"
 }
