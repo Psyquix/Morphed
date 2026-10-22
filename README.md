@@ -1,73 +1,84 @@
-<div align="center"><a href="https://github.com/Safouene1/support-palestine-banner/blob/master/Markdown-pages/Support.md"><img src="https://raw.githubusercontent.com/Safouene1/support-palestine-banner/master/banner-support.svg" alt="Support Palestine" style="width: 100%;"></a></div>
+<div align="center">
+  <img src="./.github/assets/icon.png" alt="Morphed" width="72">
+  <img src="./.github/assets/icon1.png" alt="Morphed" width="72">
+  <h1>Morphed</h1>
+  <p><strong>Automated arm64-v8a APK builds for YouTube, YouTube Music, Reddit, TikTok, and X.</strong></p>
+</div>
 
-<div align="center"><h1><img src="https://raw.githubusercontent.com/nullcpy/rvb/a5af1123e55c63119c6b81be894602e2f032fe08/.github/assets/icon.png"> <img src="https://raw.githubusercontent.com/nullcpy/rvb/a5af1123e55c63119c6b81be894602e2f032fe08/.github/assets/icon1.png"><br>ReVanced & Morphe Builder</h1></div>
+<p align="center">
+  <a href="https://github.com/Psyquix/Morphed/releases/latest"><img src="https://img.shields.io/github/v/release/Psyquix/Morphed?label=latest&style=flat-square" alt="Latest release"></a>
+  <a href="https://github.com/Psyquix/Morphed/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Psyquix/Morphed/ci.yml?label=CI&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/Psyquix/Morphed/releases"><img src="https://img.shields.io/github/downloads/Psyquix/Morphed/total?label=downloads&style=flat-square" alt="Downloads"></a>
+</p>
 
-<p align="center"><b>Automatically builds and publishes APKs & Magisk/KernelSU Modules whenever new patches are released.</b></p>
+Morphed is a personal APK builder. It watches the patch sources and app versions used by this repository, builds the matching APKs on GitHub Actions, and publishes them to [Releases](https://github.com/Psyquix/Morphed/releases).
 
-<p align="center"><a href="https://t.me/rvb27"><img src="https://img.shields.io/badge/Group-26A5E4?style=flat&logo=telegram&logoColor=white"></a> <a href="https://nullcpy.github.io/"><img src="https://img.shields.io/badge/Download-21a378?style=flat&logo=data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjZmZmZmZmIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNSAyMGgxNHYtMkg1djJ6TTE5IDloLTRWM0g5djZINWw3IDcgNy03eiIvPjwvc3ZnPg==&logoColor=white"></a> <a href="https://t.me/s/rvb28"><img src="https://img.shields.io/badge/Channel-26A5E4?style=flat&logo=telegram&logoColor=white"></a> <a href="https://fahim-ahmed05.github.io/donate"><img src="https://img.shields.io/badge/Donate-ea4335?style=flat&logo=ko-fi&logoColor=white"></p>
+- **Architecture:** `arm64-v8a` only
+- **Format:** APK only
+- **Patch channels:** stable and beta
+- **App variants:** stable and experimental, where available
+- **Builds:** fully automated, with Manual CI available for on-demand runs
 
-<p align="center"><a href="https://github.com/nullcpy/rvb"><img src="https://img.shields.io/github/stars/nullcpy/rvb?label=Stars&logo=github&style=social"></a> <a href="https://nullcpy.github.io/"><img src="https://img.shields.io/github/downloads/nullcpy/rvb/total?logo=data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMDAwMDAwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNSAyMGgxNHYtMkg1djJ6TTE5IDloLTRWM0g5djZINWw3IDcgNy03eiIvPjwvc3ZnPg==&label=Downloads&style=social"></a></p>
+## 📥 Download
 
-<p align="center"><a href="https://nullcpy.github.io"><img src="https://visitor-badge.laobi.icu/badge?page_id=nullcpy.github.io&left_text=Website%20Visitors&right_color=%231283c3&format=true&query_only=true"></a> <a href="https://github.com/nullcpy/rvb"><img src="https://visitor-badge.laobi.icu/badge?page_id=nullcpy.rvb&left_text=GitHub%20Visitors&format=true"></a> </p>
+Download the latest APKs from **[Releases](https://github.com/Psyquix/Morphed/releases)**.
 
----
+Each release contains separate files for the app variants that were built. Experimental builds appear only when the patch source and the installed app version are compatible.
 
-<p align="center"><a href="https://github.com/nullcpy/rvb/issues"><img src="https://img.shields.io/badge/Issues-2f2f2f?style=flat&logo=github&logoColor=white"></a> <a href="https://github.com/nullcpy/rvb/pulls"><img src="https://img.shields.io/badge/Pull%20Requests-2f2f2f?style=flat&logo=github&logoColor=white"></a> <a href="https://github.com/nullcpy/rvb/discussions"><img src="https://img.shields.io/badge/Discussions-2f2f2f?style=flat&logo=github&logoColor=white"></a> <a href="https://github.com/nullcpy/rvb/actions"><img src="https://img.shields.io/badge/Actions-2f2f2f?style=flat&logo=github&logoColor=white"></a></p>
+## 📱 Supported apps
 
----
-
-## 🤝 Support the Project
-
-Building, testing, and maintaining these automated workflows takes a significant amount of time. If this builder has saved you time or made your life easier, any support is hugely appreciated!
-
-- **❤️ [Donate](https://fahim-ahmed05.github.io/donate)** if you can.
-- **⭐ Star this repository** (This is a huge help!)
-- **📢 Share the project** with others who might find it useful.
-
-Thank you to everyone who helps keep this project alive!
-
----
-
-> [!NOTE]
->
-> 🌐 **[Visit Download Website](https://nullcpy.github.io/)**
->
-> For the best experience, please download from the website. It features:
->
-> - 📱 **The complete list of every supported app.**
-> - 📦 Clear separation between **Stable**, **Beta** and **Variant** builds.
-> - 🏷️ Beautifully organized version numbers and download tracking.
-> - 🔄 Step-by-step instructions on how to set up automatic updates using **Obtainium** and easy **Add to Obtainium** button.
->
-> **🤖 Fully Automated Builds**
->
-> All APKs and modules in this repository are 100% automated. If you need help, please direct your feedback to the right place:
->
-> - 🧩 **Patch Issues:** If a specific feature/mod is broken (e.g., ads are showing), please open an issue in the **respective patch developer's repository**.
-> - 🛠️ **Builder Issues:** If an app fails to build, or the download links are broken, **[open an Issue here on GitHub](https://github.com/nullcpy/rvb/issues/new/choose)** or **[send a message in our Telegram Group](https://t.me/rvb27/306)**.
-> - 💬 **General Help & Requests:** Need help installing, or want to request a new app? **[Send a message in our Telegram Group](https://t.me/rvb27/306)** or **[open an Issue here on GitHub](https://github.com/nullcpy/rvb/issues/new/choose)** or **[open a discussion here on GitHub](https://github.com/nullcpy/rvb/discussions/new?category=general)**.
-
----
-
-## 📱 Patched Apps
-
-| App | Patch source | Beta patches | Experimental build |
+| App | Patch source | Stable | Experimental |
 |---|---|---|---|
 | YouTube | [MorpheApp/morphe-patches](https://github.com/MorpheApp/morphe-patches) | ✅ | ✅ |
 | YouTube Music | [MorpheApp/morphe-patches](https://github.com/MorpheApp/morphe-patches) | ✅ | ✅ |
 | Reddit | [MorpheApp/morphe-patches](https://github.com/MorpheApp/morphe-patches) | ✅ | ✅ |
-| TikTok | [SysAdminDoc/hushfeed](https://github.com/SysAdminDoc/hushfeed) | ✅ | ✅ |
-| X (Twitter) | [crimera/piko](https://github.com/crimera/piko) | ✅ | ✅ |
+| TikTok | [SysAdminDoc/hushfeed](https://github.com/SysAdminDoc/hushfeed) | ✅ | — |
+| X (Twitter) | [crimera/piko](https://github.com/crimera/piko) | ✅ | — |
 
-All builds are APK only, using stable and beta patches with stable plus experimental app versions.
+TikTok and X do not currently have a compatible experimental app version. Their stable builds are still produced.
 
----
+## ⚙️ How it works
 
-## 💖 Credits & Acknowledgements
+1. The scheduled **CI** workflow checks the configured patch sources and app versions.
+2. When a new patch release or supported app version appears, it starts a **Build** run.
+3. The build workflow fetches this repository's configuration from the `data` branch, downloads the stock APK, applies the patches, signs the result, and uploads the APK to a GitHub Release.
+4. **Manual CI** can be started at any time from the Actions tab with `configs/config.manual.toml` or one of the generated build pools.
 
-This automated builder would not be possible without the incredible work and dedication of the open-source Android community. A massive thank you to:
+### Branches
 
-- **[peternmuller](https://github.com/peternmuller)**, **[nvbangg](https://github.com/nvbangg/revanced-morphe-builder)**, and **[j-hc](https://github.com/j-hc)** for their phenomenal foundational build scripts, CI/CD pipelines, and automation logic that power the core of this repository.
-- **The Patch Maintainers:** Huge appreciation to the development teams behind **ReVanced**, **MorpheApp**, **Anddea**, **RVX**, **Piko**, **De-Vanced**, and all the other independent developers who spend countless hours reverse-engineering, updating, and keeping these patches alive for everyone.
+| Branch | Contents |
+|---|---|
+| `main` | Builder code, workflows, scripts, documentation |
+| `data` | App configuration and CI state |
+| `website` | Release manifests and cumulative archives |
+| `update` | Module changelog and update files |
 
-_If you enjoy using these builds, please consider starring their upstream repositories and supporting the original patch developers!_
+`configs/` and `state/` are intentionally not tracked on `main`; they are materialized from `data` by the workflows.
+
+## 🛠️ Configuration
+
+App definitions live on the `data` branch in `configs/patches/*.toml`. `configs/config.manual.toml` is a standalone configuration used by Manual CI.
+
+```bash
+git switch main
+bash .github/scripts/fetch_data_branch.sh
+
+# edit configs/patches/*.toml and/or configs/config.manual.toml
+
+python3 .github/scripts/compile_patch_configs.py
+bash .github/scripts/push_data_configs.sh "feat(configs): update app configuration"
+```
+
+`fetch_data_branch.sh` overwrites the local `configs/` directory, so publish your edits before fetching again. `push_data_configs.sh` adds or updates TOML files; it does not delete files. Remove a whole patch source on the `data` branch explicitly if you want it gone.
+
+The full key reference is in [CONFIG.md](CONFIG.md), and the builder internals are documented under [docs/](docs/).
+
+## 🙏 Credits
+
+- Builder architecture based on [nullcpy/rvb](https://github.com/nullcpy/rvb) and its upstream contributors.
+- Patches by [MorpheApp](https://github.com/MorpheApp/morphe-patches), [SysAdminDoc/hushfeed](https://github.com/SysAdminDoc/hushfeed), and [crimera/piko](https://github.com/crimera/piko).
+- Thanks to the ReVanced project and the wider Android modding community for the tools and documentation that make builds like this possible.
+
+## ⚠️ Disclaimer
+
+These are unofficial builds. This repository is not affiliated with Google, Reddit, TikTok, X, MorpheApp, hushfeed, Piko, or ReVanced. Use the builds at your own risk; patched apps can break, and modifying an app may violate its terms of service. Only build and install apps you have the right to modify.
