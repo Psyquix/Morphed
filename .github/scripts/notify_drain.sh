@@ -18,6 +18,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/notify_queue.sh"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_pack.sh
+source "$SCRIPT_DIR/notify_pack.sh"
 # shellcheck source=notify_discord.sh
 source "$SCRIPT_DIR/notify_discord.sh"
 
@@ -84,20 +86,14 @@ send_chunk() {
 	fi
 }
 
-# Chunk on line boundaries, mirroring build_notify_telegram.sh.
-CHUNK=""
-while IFS= read -r LINE; do
-	CANDIDATE="${CHUNK:+${CHUNK}${NL}}${LINE}"
-	if [ "${#CANDIDATE}" -le "$TG_LIMIT" ]; then
-		CHUNK="$CANDIDATE"
-	else
+# Pack on block boundaries, not lines: one rendered event is a header line plus its
+# detail lines, and splitting between them leaves a bare "🌿 branch • actor" message with
+# no issue or run to point at (see notify_pack.sh).
+while IFS= read -r -d "$PACK_RS" CHUNK; do
+	if [ -n "$CHUNK" ]; then
 		send_chunk "$CHUNK" || exit 1
-		CHUNK="$LINE"
 	fi
-done <<< "$MSG"
-if [ -n "$CHUNK" ]; then
-	send_chunk "$CHUNK" || exit 1
-fi
+done < <(printf '%s' "$MSG" | pack_message "$TG_LIMIT" '^\*.*\*$')
 
 # The mirror is best-effort HERE, and that is deliberate: a non-zero after the
 # Telegram chunks have gone out would skip the prune below, the queue would keep its

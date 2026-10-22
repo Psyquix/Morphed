@@ -2,7 +2,9 @@
 # notify_discord.sh — the Discord mirror of every Telegram notification. Sourced,
 # never executed: each send site calls discord_send once next to the Telegram
 # request it already makes and gets the whole transport from here — dialect
-# conversion, the 2000-character split, the rate-limit pause, the response check.
+# conversion, the 2000-unit split, the rate-limit pause, the response check. The
+# splitting itself is notify_pack.sh's, so a mirrored message breaks where the
+# Telegram one breaks and not somewhere else with a different idea of a boundary.
 #
 # Why one webhook per Discord channel: the URL is both the destination and the
 # credential, so there is no chat-handle-plus-topic pair to keep in sync, and a
@@ -40,9 +42,27 @@
 #
 # Depends on: jq, curl, mktemp. Requires bash 4+ for ${var:offset:length}.
 
-DISCORD_LIMIT=2000       # content characters per message; Telegram's 4096 is unusable
+DISCORD_LIMIT=2000       # UTF-16 code units per message; Telegram's 4096 is unusable
 DISCORD_PAUSE=2          # seconds between posts: webhooks are capped per minute
 DISCORD_RETRY_AFTER=2    # seconds to wait before one retry on HTTP 429
+
+# Own directory, not SCRIPT_DIR: every send site defines that already, and a sourced
+# library overwriting it would move the caller's own sources to this directory.
+DC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=notify_pack.sh
+source "$DC_DIR/notify_pack.sh"
+
+# _pack_len_units <text> — set _PACK_LEN to the UTF-16 code-unit length of <text>, the
+# currency Discord charges against its 2000-message limit. ${#var} counts a leading emoji
+# as one character while the API counts it as two, so a char-budgeted message can be twice
+# as long as it looks and get rejected; that is why the mirror passes its own measure to
+# pack_message instead of using the default. jq takes no hex literals, so the plane-1
+# boundary is spelled 65536, and its line ending is stripped because jq on Windows
+# terminates output with CRLF — a trailing CR reaches arithmetic and fails the split.
+_pack_len_units() {
+	_PACK_LEN=$(printf '%s' "$1" | jq -Rs \
+		'(length + ([explode[] | select(. >= 65536)] | length))' | tr -d '\r')
+}
 
 # discord_from_tg_md — Telegram legacy Markdown to Discord Markdown, stdin to stdout.
 # A paired *run* becomes **run**, because on Discord a single pair means italics and
@@ -73,36 +93,6 @@ discord_from_tg_html() {
 		-e 's|<code>\([^<]*\)</code>|`\1`|g' \
 		-e 's|<a href="\([^"]*\)">\([^<]*\)</a>|[\2](\1)|g' \
 		-e 's|&lt;|<|g; s|&gt;|>|g; s|&quot;|"|g; s|&amp;|\&|g'
-}
-
-# discord_wrap — stdin to stdout, with every emitted line at most DISCORD_LIMIT
-# characters. The mirror packs whole lines (below), so this step exists only for a
-# line that is itself too long — a signed CDN link. Such a line breaks at its last
-# space inside the limit so words stay glued, and only hard-cuts when there is no
-# space to break at; dropping a notice to keep one URL intact is the worse failure.
-discord_wrap() {
-	local line cut rest sp
-	while IFS= read -r line; do
-		while [ "${#line}" -gt "$DISCORD_LIMIT" ]; do
-			cut=${line:0:$DISCORD_LIMIT}
-			rest=${line:$DISCORD_LIMIT}
-			case "$cut" in
-			*" "*)
-				sp=${cut% *}
-				# Only take the space break when the piece is still worth its size;
-				# a 40-character message is not worth splitting a 2000-character line for.
-				if [ "${#sp}" -ge "$((DISCORD_LIMIT / 2))" ]; then
-					cut=$sp
-					rest=${line:${#sp}}
-					rest=${rest# }
-				fi
-				;;
-			esac
-			printf '%s\n' "$cut"
-			line=$rest
-		done
-		printf '%s\n' "$line"
-	done
 }
 
 # _discord_post_once <url> <content> — post one message. Discord answers 204 with no
@@ -146,28 +136,15 @@ _discord_post_once() {
 	return "$rc"
 }
 
-# _discord_units — stdin lines to stdout numbers: the UTF-16 code-unit length of each
-# line, which is what Discord counts against its 2000-message limit. ${#var} cannot
-# answer it: every header here leads with a non-BMP emoji, and one of those is a single
-# shell character but two charged units, so a char-counted budget can be up to twice
-# too generous and the post is rejected. One jq pass prices the whole message. jq
-# takes no hex literals, so the plane-1 boundary is spelled 65536, and its line ending
-# is stripped because jq on Windows terminates every line with CRLF - a trailing CR
-# reaches the packer's arithmetic and fails the whole split rather than one message.
-_discord_units() {
-	jq -Rr '(length + ([explode[] | select(. >= 65536)] | length)) | tostring' | tr -d '\r'
-}
-
 # discord_send <webhook-url> <text> [md|html] — mirror <text> to one Discord channel.
 # <text> is the complete message body in Telegram's dialect; this splits it into
-# Discord-sized messages on line boundaries itself, so callers pass the whole text
-# once instead of their own Telegram chunks. mode selects the dialect of what is
-# handed in and defaults to md. Returns 1 when any message was rejected; a channel
-# with no webhook configured is a skip, not an error.
+# Discord-sized messages itself, so callers pass the whole text once instead of their
+# own Telegram chunks. mode selects the dialect of what is handed in and defaults to
+# md. Returns 1 when any message was rejected; a channel with no webhook configured is
+# a skip, not an error.
 discord_send() {
 	local url=${1:-} text=${2:-} mode=${3:-md}
-	local nl=$'\n' chunk="" line rc=0 posts=0 used=0 w i
-	local -a lines weights
+	local chunk rc=0 posts=0
 	if [ -z "$url" ]; then
 		echo "Discord webhook not set for this sink; skipping the mirror."
 		return 0
@@ -189,52 +166,21 @@ discord_send() {
 		text=$(discord_from_tg_md <<<"$text")
 	fi
 
-	# Wrapped lines first, then their price: packing needs the unit count of each line
-	# before it decides, not after the message is built.
-	mapfile -t lines < <(printf '%s\n' "$text" | discord_wrap)
-	mapfile -t weights < <(printf '%s\n' "${lines[@]}" | _discord_units)
-
-	# Pack whole lines up to the limit; a line that does not fit the current message
-	# starts a new one, so a line is never broken to make it fit. The buffer is tracked
-	# by a counter, not by [ -z "$chunk" ]: a blank line is a real first line of a
-	# message here (the notices separate sections with one), and testing the buffer
-	# would quietly drop it every time a message happened to start on one.
-	local started=0
-	chunk=""
-	used=0
-	for i in "${!lines[@]}"; do
-		line=${lines[$i]}
-		w=${weights[$i]:-0}
-		if [ "$started" = 0 ]; then
-			chunk=$line
-			used=$w
-			started=1
-			continue
-		fi
-		# +1 for the newline joining them
-		if [ $((used + 1 + w)) -gt "$DISCORD_LIMIT" ]; then
+	# Same packer the Telegram sites use, so the mirror's boundaries match theirs:
+	# whole blocks only, and a heading travels with the block under it. The heading
+	# pattern is post-conversion Discord Markdown — both the legacy-Markdown `*x*` and
+	# the release-notes `<b>x</b>` forms have become **x** by now.
+	while IFS= read -r -d "$PACK_RS" chunk; do
+		if [ -n "$chunk" ]; then
 			if [ "$posts" -gt 0 ]; then
 				sleep "$DISCORD_PAUSE"
 			fi
 			_discord_post_once "$url" "$chunk" || rc=1
 			posts=$((posts + 1))
-			chunk=$line
-			used=$w
-			started=1
-		else
-			chunk="${chunk}${nl}${line}"
-			used=$((used + 1 + w))
 		fi
-	done
-	if [ "$started" = 1 ] && [ -n "$chunk" ]; then
-		if [ "$posts" -gt 0 ]; then
-			sleep "$DISCORD_PAUSE"
-		fi
-		_discord_post_once "$url" "$chunk" || rc=1
-		posts=$((posts + 1))
-	fi
-	# A message whose only content is blank carries nothing; posting it would be noise.
-	if [ "$posts" = 0 ] && [ -z "${chunk//[[:space:]]/}" ]; then
+	done < <(printf '%s' "$text" | pack_message "$DISCORD_LIMIT" '^\*\*.*\*\*$' _pack_len_units)
+
+	if [ "$posts" = 0 ]; then
 		echo "Nothing to mirror to Discord."
 		return 0
 	fi

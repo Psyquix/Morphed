@@ -257,7 +257,9 @@ Step order, with the reason each is where it is:
     run's fetch converges and the worst case is one redundant republish).
 17. `build_notify_telegram.sh` posts the release to the channel's thread and to the
     broadcast channel, and mirrors the release text once to
-    `DISCORD_WEBHOOK_BUILDER_LOG` (stable and beta share that one channel).
+    `DISCORD_WEBHOOK_BUILDER_LOG` (stable and beta share that one channel). Both services
+    split it through `pack_message`, so a message never opens with an app's arch links
+    separated from the app itself ([Where a message ends](#where-a-message-ends-notify_packsh)).
     `continue-on-error`: the chat, the channel and the topic come
     from variables only (no built-in handle), so an unset one fails this step — but
     the step runs last, after publishing, and a notification-config error must not
@@ -296,8 +298,8 @@ Step order, with the reason each is where it is:
 
 ## Notify (`notify.yml`)
 
-Two delivery models sharing one renderer (`notify_render.sh`) and one target guard
-(`notify_targets.sh`):
+Two delivery models sharing one renderer (`notify_render.sh`), one target guard
+(`notify_targets.sh`) and one message packer (`notify_pack.sh`):
 
 - **`workflow_call` — immediate.** A caller (`ci.yml`/`manual-ci.yml`) invokes it on
   `failure()`; the `notify` job renders the generic "🔴 CI #N failed" alert via
@@ -349,10 +351,10 @@ Two rules that are easy to get wrong and are enforced in the library, not at the
 - **Message size is counted in UTF-16 code units, not characters.** Discord charges 2000
   units and `bash` counts a leading emoji as one character while the API charges it as
   two, so a char-counted budget can be twice too generous and the post is rejected. The
-  library prices each line with one `jq` pass (`_discord_units`) and packs whole lines,
-  so a `[label](url)` is never broken to make it fit; a line longer than the limit on its
-  own (a signed CDN link) is folded at its last space, then hard-cut, because losing the
-  notice to preserve one URL is the worse failure. The dialect shift (`*x*` → `**x**`,
+  library passes its own measure (`_pack_len_units`, one `jq` pass per block) to
+  `pack_message`, which is where the splitting itself happens — see
+  [Where a message ends](#where-a-message-ends-notify_packsh) for why the mirror and the
+  Telegram send break at the same places. The dialect shift (`*x*` → `**x**`,
   `<b>` → `**`, `&amp;` → `&`) runs under `LC_ALL=C` for the same byte-vs-character
   reason: under a UTF-8 locale `sed` mis-matches the emoji that leads every header.
 - **A copy must not break a resend contract.** `notify_drain.sh` is the one site that
@@ -369,6 +371,29 @@ URL therefore lives in repository **secrets** (it carries its token), never in a
 and never in a file in this repo, and it is deliberately absent from every log line the
 library writes. `allowed_mentions: {parse: []}` is sent on every message, because a PR or
 issue title containing `@everyone` would otherwise ping the whole server.
+
+### Where a message ends (`notify_pack.sh`)
+
+Every body too long for one message is split by `pack_message`, which packs **blocks**,
+not lines. A block is a paragraph — consecutive lines with no blank line between them —
+and that is the grammar these notices are written in: an app entry is its `• App vX` line
+plus the `  ╰ APK:` / `  ╰ Module:` lines under it, and those lines mean nothing apart.
+The chunkers this replaced filled messages line by line, so a long release produced
+messages that opened with an orphan `╰ APK:` under no app name at all, and section
+headings that ended one message while their content went in the next.
+
+A caller names what a heading looks like in its own dialect (`^<b>.*</b>$` for the release
+notes, `^\*.*\*$` for the Markdown reports, `^\*\*.*\*\*$` for converted Discord text) and
+the packer glues each heading to the block under it, so a boundary can never fall between
+them. The one thing it cannot honour: a single block larger than the limit is still split
+(on a line boundary, then a space, then hard), which is the only remaining case
+where a continuation appears without its heading — unreachable for these bodies, since the
+largest block is one app with two arch links.
+
+`ci_notify_queue.sh` keeps its own assembly loop: it decides group boundaries while it
+builds the notice (a group too big for one message repeats its header), which is a
+stronger guarantee than packing finished text, so it is left alone and only its output is
+mirrored.
 
 The queue is append-only and every plumbing call pins `core.autocrlf=false` /
 `core.eol=lf`, so the JSONL bytes (and the drain's prefix prune) do not depend on

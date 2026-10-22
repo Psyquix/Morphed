@@ -3,6 +3,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_pack.sh
+source "$SCRIPT_DIR/notify_pack.sh"
 # shellcheck source=notify_discord.sh
 source "$SCRIPT_DIR/notify_discord.sh"
 NL=$'\n'
@@ -48,7 +50,9 @@ BODY="$(sed \
 TITLE_SUFFIX_ESC="$(echo "${TITLE_SUFFIX:-}" | sed 's/&/&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')"
 MSG="<b>Build No. $NEXT_VER_CODE</b>${TITLE_SUFFIX_ESC}${NL}${NL}${BODY}"
 
-# Split MSG into ≤4096-char chunks on line boundaries (never breaks URLs)
+# Split MSG into ≤4096-char messages on block boundaries (never a URL, and never
+# between an app's name line and its per-arch link lines) - see notify_pack.sh for why
+# packing whole lines is the wrong unit here.
 TG_LIMIT=4096
 CHUNK=""
 send_chunk() {
@@ -69,24 +73,13 @@ send_chunk() {
     "https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
 }
 
-while IFS= read -r LINE; do
-  # +1 for the newline we'll re-add between lines
-  CANDIDATE="${CHUNK:+${CHUNK}${NL}}${LINE}"
-  if [ "${#CANDIDATE}" -le "$TG_LIMIT" ]; then
-    CHUNK="$CANDIDATE"
-  else
-    # Flush current chunk and start a new one with this line
-    if [ -n "$CHUNK" ]; then
-      send_chunk "$CHUNK"
-    fi
-    CHUNK="$LINE"
+while IFS= read -r -d "$PACK_RS" CHUNK; do
+  # an if block, not `[ … ] && send_chunk`: a short-circuit that evaluates false is the
+  # last command of the body and would abort the step under set -e (repo rule 6)
+  if [ -n "$CHUNK" ]; then
+    send_chunk "$CHUNK"
   fi
-done <<< "$MSG"
-
-# Send any remaining content
-if [ -n "$CHUNK" ]; then
-  send_chunk "$CHUNK"
-fi
+done < <(printf '%s' "$MSG" | pack_message "$TG_LIMIT" '^<b>.*</b>$')
 
 # One mirror of the whole note, after the Telegram loop: that loop already posts each
 # chunk twice (group topic and broadcast channel), and Discord has one channel for the

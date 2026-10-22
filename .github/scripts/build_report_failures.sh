@@ -39,6 +39,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_pack.sh
+source "$SCRIPT_DIR/notify_pack.sh"
 # shellcheck source=notify_discord.sh
 source "$SCRIPT_DIR/notify_discord.sh"
 
@@ -307,22 +309,15 @@ send_chunk() {
 
 CHUNK=""
 sent=0
-while IFS= read -r LINE; do
-	CANDIDATE="${CHUNK:+${CHUNK}${NL}}${LINE}"
-	if [ "${#CANDIDATE}" -le "$TG_LIMIT" ]; then
-		CHUNK="$CANDIDATE"
-	else
-		if [ -n "$CHUNK" ]; then
-			send_chunk "$CHUNK"
-			sent=1
-		fi
-		CHUNK="$LINE"
+# Blocks, not lines: an app's entry and its per-arch detail lines belong together, and a
+# section heading must never be the last thing in a message (see notify_pack.sh). The
+# heading pattern is this body's own Markdown: *🚨 Build Failed (2 apps)*.
+while IFS= read -r -d "$PACK_RS" CHUNK; do
+	if [ -n "$CHUNK" ]; then
+		send_chunk "$CHUNK"
+		sent=1
 	fi
-done <<< "$MSG"
-if [ -n "$CHUNK" ]; then
-	send_chunk "$CHUNK"
-	sent=1
-fi
+done < <(printf '%s' "$MSG" | pack_message "$TG_LIMIT" '^\*.*\*$')
 
 if [ "$sent" = 1 ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
 	echo "reported_failures=true" >> "$GITHUB_OUTPUT"
