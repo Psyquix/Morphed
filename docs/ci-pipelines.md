@@ -370,7 +370,13 @@ means that sink is not mirrored, and a fork holding neither credential stays sil
 URL therefore lives in repository **secrets** (it carries its token), never in a variable
 and never in a file in this repo, and it is deliberately absent from every log line the
 library writes. `allowed_mentions: {parse: []}` is sent on every message, because a PR or
-issue title containing `@everyone` would otherwise ping the whole server.
+issue title containing `@everyone` would otherwise ping the whole server, and
+`flags: 4` (SUPPRESS_EMBEDS) with it — that is the webhook form of the
+`disable_web_page_preview=true` every Telegram send already passes. It is not a
+formality: `[label](url)` unfurls into a preview card on Discord while showing nothing but
+the label in a Telegram topic, so a release note carrying six arch links arrives as six
+stacked images unless the flag is set (measured: the same text yields `embeds: 2` without
+it and `embeds: 0` with it, read back from the created message via `?wait=true`).
 
 ### Where a message ends (`notify_pack.sh`)
 

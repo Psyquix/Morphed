@@ -45,6 +45,14 @@
 DISCORD_LIMIT=2000       # UTF-16 code units per message; Telegram's 4096 is unusable
 DISCORD_PAUSE=2          # seconds between posts: webhooks are capped per minute
 DISCORD_RETRY_AFTER=2    # seconds to wait before one retry on HTTP 429
+# Message flag 4 = SUPPRESS_EMBEDS: the webhook equivalent of the
+# disable_web_page_preview=true every Telegram send already passes. It has to be set on
+# the message, not inferred from the text - a [label](url) link unfurls into a full
+# preview card on Discord even though the same markup shows nothing but the label in a
+# Telegram topic, and one release note with six arch links becomes six stacked images.
+# This suppresses previews only; an explicit embed would still need its own handling,
+# and none is ever sent here.
+DISCORD_FLAGS_NO_EMBEDS=4
 
 # Own directory, not SCRIPT_DIR: every send site defines that already, and a sourced
 # library overwriting it would move the caller's own sources to this directory.
@@ -104,8 +112,8 @@ _discord_post_once() {
 	tmp=$(mktemp)
 	rc=1
 	for attempt in 1 2; do
-		if ! code=$(jq -n --arg c "$content" \
-			'{content: $c, allowed_mentions: {parse: []}}' |
+		if ! code=$(jq -n --arg c "$content" --argjson f "$DISCORD_FLAGS_NO_EMBEDS" \
+			'{content: $c, allowed_mentions: {parse: []}, flags: $f}' |
 			curl -sS -o "$tmp" -w '%{http_code}' -X POST \
 				-H 'Content-Type: application/json' \
 				--data-binary @- "$url"); then
