@@ -4,7 +4,7 @@
   "meta": {
     "build": "stable",
     "channel": "stable",
-    "publishedAt": "2026-10-22T17:43:46Z"
+    "publishedAt": "2026-10-22T23:10:02Z"
   },
   "files": {
     "reddit-morphe-experimental-v2026.42.0-arm64-v8a.apk": {
@@ -56,8 +56,8 @@
         "Spoof signature",
         "Start as guest"
       ],
-      "originBuild": "260189",
-      "publishedAt": "2026-10-22T17:43:00Z"
+      "originBuild": "260191",
+      "publishedAt": "2026-10-22T23:09:47Z"
     },
     "reddit-morphe-v2026.24.0-arm64-v8a.apk": {
       "name": "reddit-morphe",
@@ -108,8 +108,8 @@
         "Spoof signature",
         "Start as guest"
       ],
-      "originBuild": "260189",
-      "publishedAt": "2026-10-22T17:43:00Z"
+      "originBuild": "260191",
+      "publishedAt": "2026-10-22T23:09:47Z"
     },
     "tiktok-hushfeed-v47.4.3-arm64-v8a.apk": {
       "name": "tiktok-hushfeed",
@@ -470,8 +470,8 @@
         "Shorts icon style",
         "Player icon style"
       ],
-      "originBuild": "260189",
-      "publishedAt": "2026-10-22T17:43:00Z"
+      "originBuild": "260191",
+      "publishedAt": "2026-10-22T23:09:47Z"
     },
     "youtube-morphe-v21.20.405-arm64-v8a.apk": {
       "name": "youtube-morphe",
