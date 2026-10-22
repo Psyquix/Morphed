@@ -1,4 +1,53 @@
 {
-  "stable": {},
+  "stable": {
+    "reddit-morphe-v2026.24.0-arm64-v8a": {
+      "hash": "95fc0d90314664eb2927c235c2fdaf30",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "twitter-piko-v12.19.1-release.0-arm64-v8a": {
+      "hash": "7b8267c75e0010897be2bcb1bc5355d8",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "youtube-morphe-v21.20.405-arm64-v8a": {
+      "hash": "61d4cc0671a5cfee0fbc6504e83e2a3c",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "reddit-morphe-experimental-v2026.42.0-arm64-v8a": {
+      "hash": "b2cb4a07dbcb342d91f135920a34b91a",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "youtube-morphe-experimental-v21.42.241-arm64-v8a": {
+      "hash": "dadf7cc5241b4127f873720c467d3a87",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "youtube-music-morphe-v9.20.53-arm64-v8a": {
+      "hash": "df2554259ac8b4a0613581fa132d9aa2",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "youtube-music-morphe-experimental-v9.42.52-arm64-v8a": {
+      "hash": "dca3c6807ce91e699442262eef87411c",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "tiktok-hushfeed-v47.4.3-arm64-v8a": {
+      "hash": "c12b35c5c0a503f0fb5a6f3b1ad2ac8b",
+      "kinds": [
+        "apk"
+      ]
+    }
+  },
   "beta": {}
 }
