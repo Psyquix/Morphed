@@ -54,6 +54,19 @@ DISCORD_RETRY_AFTER=2    # seconds to wait before one retry on HTTP 429
 # and none is ever sent here.
 DISCORD_FLAGS_NO_EMBEDS=4
 
+# The blank line that closes a mirrored message, so consecutive notices do not read as
+# one wall of text. Discord trims trailing whitespace, so the closing line has to hold a
+# character — a zero-width space, written as octal escapes because an invisible literal
+# sitting in source is unreadable and survives every review.
+#
+# Measured in the channel, not assumed: text + "\n" shows no gap, text + "\n" + the
+# character alone shows no gap either (the client collapses a single trailing line), and
+# only text + blank line + the character renders as real space. Hence two newlines here.
+# It goes on the LAST message of a mirror only: a notice split across parts is still one
+# notice, and padding between its parts would put the gap in the middle of it.
+DISCORD_TAIL=$(printf '\n\n\342\200\213')
+DISCORD_TAIL_UNITS=3   # what the packer must leave room for
+
 # Own directory, not SCRIPT_DIR: every send site defines that already, and a sourced
 # library overwriting it would move the caller's own sources to this directory.
 DC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -224,7 +237,7 @@ _discord_post_once() {
 # a skip, not an error.
 discord_send() {
 	local url=${1:-} text=${2:-} mode=${3:-md}
-	local chunk rc=0 posts=0
+	local rc=0 posts=0
 	if [ -z "$url" ]; then
 		echo "Discord webhook not set for this sink; skipping the mirror."
 		return 0
@@ -257,15 +270,30 @@ discord_send() {
 	# whole blocks only, and a heading travels with the block under it. The heading
 	# pattern is post-conversion Discord Markdown — both the legacy-Markdown `*x*` and
 	# the release-notes `<b>x</b>` forms have become **x** by now.
-	while IFS= read -r -d "$PACK_RS" chunk; do
-		if [ -n "$chunk" ]; then
-			if [ "$posts" -gt 0 ]; then
-				sleep "$DISCORD_PAUSE"
-			fi
-			_discord_post_once "$url" "$chunk" || rc=1
-			posts=$((posts + 1))
+	# Collect the parts before sending any of them, because the closing blank line belongs
+	# after the whole message and not after each of its parts. The limit gives back the
+	# tail's units so the final part cannot cross 2000 once it is appended.
+	local -a pieces=()
+	local piece i
+	while IFS= read -r -d "$PACK_RS" piece; do
+		if [ -n "$piece" ]; then
+			pieces+=("$piece")
 		fi
-	done < <(printf '%s' "$text" | pack_message "$DISCORD_LIMIT" '^\*\*.*\*\*$' _pack_len_units)
+	done < <(printf '%s' "$text" | pack_message "$((DISCORD_LIMIT - DISCORD_TAIL_UNITS))" '^\*\*.*\*\*$' _pack_len_units)
+
+	local last=$(( ${#pieces[@]} - 1 ))
+	for i in "${!pieces[@]}"; do
+		if [ "$posts" -gt 0 ]; then
+			sleep "$DISCORD_PAUSE"
+		fi
+		if [ "$i" = "$last" ]; then
+			piece="${pieces[$i]}${DISCORD_TAIL}"
+		else
+			piece=${pieces[$i]}
+		fi
+		_discord_post_once "$url" "$piece" || rc=1
+		posts=$((posts + 1))
+	done
 
 	if [ "$posts" = 0 ]; then
 		echo "Nothing to mirror to Discord."
