@@ -68,12 +68,16 @@ fi
 
 MSG="$BODY"
 
+# The batch is sent in the dialect notify_render.sh wrote it in — Telegram HTML. The
+# queue only ever holds that renderer's output, so there is no per-record dialect to
+# track: a line queued before a dialect change would have to be drained by a run that
+# already has the new renderer, and the queue drains within its debounce window.
 send_chunk() {
 	local text="${1:-}"
 	[ -z "$text" ] && return 0
 	local resp
 	resp="$(curl -s -X POST \
-		--data-urlencode "parse_mode=Markdown" \
+		--data-urlencode "parse_mode=HTML" \
 		--data-urlencode "disable_web_page_preview=true" \
 		--data-urlencode "text=${text}" \
 		--data-urlencode "chat_id=${TG_CHAT_ID}" \
@@ -100,7 +104,7 @@ done < <(printf '%s' "$MSG" | pack_message "$TG_LIMIT" '^\*.*\*$')
 # lines and the next drain would re-post the whole batch to Telegram so that a
 # Discord hiccup could be repaired. Losing one copy in the log channel is the smaller
 # error than duplicating every alert in the group.
-discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG" || true
+discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG" html || true
 
 # Sends succeeded → prune the drained lines. The queue is append-only (FIFO), so
 # the lines just drained are always a prefix of the current file; drop exactly

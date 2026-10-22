@@ -150,17 +150,20 @@ discord_from_tg_md() {
 #
 # ORDER IS THE WHOLE POINT: innermost constructs are unwrapped first, because a
 # release-note bundle heading is <b> around a link —
-# <b>🧩 owner/repo (<a href="…">v1.57.0</a>)</b> — and a rule that cannot cross a '<'
-# matches nothing until the <a> inside it has already become [text](url). Unwinding
-# outside-in left every bundle heading in the channel as literal <b>…</b> text.
+# <b>🧩 owner/repo (<a href="…">v1.57.0</a>)</b> — while an event headline is a link
+# around bold — <a href="…"><b>Issue #312 opened</b></a> — and a rule that cannot cross
+# a '<' matches nothing until whatever is inside it has already been unwound. So the
+# tag rules run twice, link-then-bold each time, and either nesting direction collapses.
 # Entities are decoded last so decoded text cannot re-enter the tag pass.
 # Same LC_ALL=C reason as discord_from_tg_md.
 discord_from_tg_html() {
 	LC_ALL=C sed \
-		-e 's|<a href="\([^"]*\)">\([^<]*\)</a>|[\2](\1)|g' \
 		-e 's|<code>\([^<]*\)</code>|`\1`|g' \
+		-e 's|<a href="\([^"]*\)">\([^<]*\)</a>|[\2](\1)|g' \
 		-e 's|<b>\([^<]*\)</b>|**\1**|g' \
 		-e 's|<i>\([^<]*\)</i>|_\1_|g' \
+		-e 's|<a href="\([^"]*\)">\([^<]*\)</a>|[\2](\1)|g' \
+		-e 's|<b>\([^<]*\)</b>|**\1**|g' \
 		-e 's|&lt;|<|g; s|&gt;|>|g; s|&quot;|"|g; s|&amp;|\&|g'
 }
 

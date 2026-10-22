@@ -39,7 +39,7 @@ tg_require_targets \
 MSG="$(render_message)"
 
 curl -s -X POST \
-	--data-urlencode "parse_mode=Markdown" \
+	--data-urlencode "parse_mode=HTML" \
 	--data-urlencode "disable_web_page_preview=true" \
 	--data-urlencode "text=${MSG}" \
 	--data-urlencode "chat_id=${TG_CHAT_ID}" \
@@ -47,5 +47,6 @@ curl -s -X POST \
 	"https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
 
 # Mirror last: the generic alert is the least important message in the system and a
-# copy of it must never be the reason the Telegram send is not reported.
-discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG"
+# copy of it must never be the reason the Telegram send is not reported. html because
+# notify_render.sh writes HTML.
+discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG" html

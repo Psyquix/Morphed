@@ -301,6 +301,17 @@ Step order, with the reason each is where it is:
 Two delivery models sharing one renderer (`notify_render.sh`), one target guard
 (`notify_targets.sh`) and one message packer (`notify_pack.sh`):
 
+The renderer writes **Telegram HTML** for every event, in the same shape the release
+notes and the build queue use: one bold clickable headline (`<a href="…"><b>🔴 CI #336
+failed</b></a> in <b>rvb</b>`) followed by `  ╰ ` detail lines. Legacy Markdown was
+abandoned here for two reasons — it cannot nest a link inside a bold run, so a headline
+had to be either bold or clickable; and it has no escaping, so the old `md()` helper
+*deleted* `* _ [ ] \`` from every title, mangling a PR named "Fix [rename] (v2)". HTML
+needs only `& < >` escaped, so titles and branch names arrive whole. `queue.jsonl` needs
+no schema change: its `text` field has always meant "whatever `notify_render.sh`
+emitted", and the queue is empty between a burst and its drain (seconds), so no
+Markdown-rendered record can outlive the switch.
+
 - **`workflow_call` — immediate.** A caller (`ci.yml`/`manual-ci.yml`) invokes it on
   `failure()`; the `notify` job renders the generic "🔴 CI #N failed" alert via
   `notify_send_telegram.sh` and posts it at once. When the caller passes
