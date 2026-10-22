@@ -48,5 +48,13 @@
         "apk"
       ]
     }
+  },
+  "beta": {
+    "twitter-piko-v12.19.1-release.0-arm64-v8a": {
+      "hash": "97c67b4a01fde215e11ae4079be68572",
+      "kinds": [
+        "apk"
+      ]
+    }
   }
 }
