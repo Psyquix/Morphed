@@ -14,6 +14,12 @@
 #    corrupt a run. A pull request titled "Fix [rename] (v2)" arrived as "Fix rename v2".
 #    HTML only needs & < > escaped, so titles and branch names arrive whole.
 #
+# Shape: one bold clickable headline carrying the only emoji in the message (the status
+# dot says what happened), then its ╰ detail lines immediately below with no blank line
+# and no per-line marks — the ╰ already says "this belongs to the line above", and a
+# marker in front of a title under a headline that says "Issue" repeats itself. A blank
+# line separates two events, which is the only place one belongs.
+#
 # Reads env describing the event and echoes the composed body. The caller supplies
 # everything except what is optional per branch.
 #
@@ -39,8 +45,8 @@ render_message() {
 
 	if [ -n "${WF_NAME:-}" ]; then
 		local wf_url="${GITHUB_SERVER_URL:-https://github.com}/${REPO}/actions/runs/${GITHUB_RUN_ID}"
-		MSG="$(hlink "$wf_url" "🔴 ${WF_NAME} #${GITHUB_RUN_NUMBER} failed") in ${REPO_MD}${NL}${NL}"
-		MSG+="  ╰ 🌿 <code>$(h "${REF_NAME}")</code> · ${ACTOR_MD}"
+		MSG="$(hlink "$wf_url" "🔴 ${WF_NAME} #${GITHUB_RUN_NUMBER} failed") in ${REPO_MD}${NL}"
+		MSG+="  ╰ <code>$(h "${REF_NAME}")</code> · ${ACTOR_MD}"
 
 	elif [ "${EVENT_NAME:-}" = "pull_request" ]; then
 		TITLE="$(h "${PR_TITLE}")"
@@ -54,9 +60,9 @@ render_message() {
 		else
 			CSTR="commits"
 		fi
-		MSG="$(hlink "${PR_URL}" "${ICON} Pull request #${PR_NUM} ${ACTION}") in ${REPO_MD}${NL}${NL}"
-		MSG+="  ╰ 📝 ${TITLE}${NL}"
-		MSG+="  ╰ 👤 ${ACTOR_MD} · 📑 <code>$(h "${PR_HEAD_REF}")</code> → <code>$(h "${PR_BASE_REF}")</code> · ${PR_COMMITS} ${CSTR} · ${PR_FILES} files · +${PR_ADD}/-${PR_DEL}"
+		MSG="$(hlink "${PR_URL}" "${ICON} Pull request #${PR_NUM} ${ACTION}") in ${REPO_MD}${NL}"
+		MSG+="  ╰ ${TITLE}${NL}"
+		MSG+="  ╰ ${ACTOR_MD} · <code>$(h "${PR_HEAD_REF}")</code> → <code>$(h "${PR_BASE_REF}")</code> · ${PR_COMMITS} ${CSTR} · ${PR_FILES} files · +${PR_ADD}/-${PR_DEL}"
 
 	else
 		TITLE="$(h "${ISSUE_TITLE}")"
@@ -65,9 +71,9 @@ render_message() {
 		reopened) ICON="🔄" ;;
 		*) ICON="🐛" ;;
 		esac
-		MSG="$(hlink "${ISSUE_URL}" "${ICON} Issue #${ISSUE_NUM} ${ACTION}") in ${REPO_MD}${NL}${NL}"
-		MSG+="  ╰ 📝 ${TITLE}${NL}"
-		MSG+="  ╰ 👤 ${ACTOR_MD}"
+		MSG="$(hlink "${ISSUE_URL}" "${ICON} Issue #${ISSUE_NUM} ${ACTION}") in ${REPO_MD}${NL}"
+		MSG+="  ╰ ${TITLE}${NL}"
+		MSG+="  ╰ ${ACTOR_MD}"
 	fi
 
 	printf '%s' "$MSG"

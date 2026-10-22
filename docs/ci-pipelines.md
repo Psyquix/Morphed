@@ -303,12 +303,14 @@ Two delivery models sharing one renderer (`notify_render.sh`), one target guard
 
 The renderer writes **Telegram HTML** for every event, in the same shape the release
 notes and the build queue use: one bold clickable headline (`<a href="…"><b>🔴 CI #336
-failed</b></a> in <b>rvb</b>`) followed by `  ╰ ` detail lines. Legacy Markdown was
-abandoned here for two reasons — it cannot nest a link inside a bold run, so a headline
-had to be either bold or clickable; and it has no escaping, so the old `md()` helper
-*deleted* `* _ [ ] \`` from every title, mangling a PR named "Fix [rename] (v2)". HTML
-needs only `& < >` escaped, so titles and branch names arrive whole. `queue.jsonl` needs
-no schema change: its `text` field has always meant "whatever `notify_render.sh`
+failed</b></a> in <b>rvb</b>`) with its `  ╰ ` detail lines immediately beneath it — no
+blank line inside an event, no per-line emoji, the status dot in the headline being the
+only one in the message — and a blank line only between two events of a batch. Legacy
+Markdown was abandoned here for two reasons — it cannot nest a link inside a bold run, so
+a headline had to be either bold or clickable; and it has no escaping, so the old `md()`
+helper *deleted* `* _ [ ] \`` from every title, mangling a PR named "Fix [rename] (v2)".
+HTML needs only `& < >` escaped, so titles and branch names arrive whole. `queue.jsonl`
+needs no schema change: its `text` field has always meant "whatever `notify_render.sh`
 emitted", and the queue is empty between a burst and its drain (seconds), so no
 Markdown-rendered record can outlive the switch.
 
