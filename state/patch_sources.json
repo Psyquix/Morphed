@@ -1,0 +1,29 @@
+{
+  "MorpheApp/morphe-patches": {
+    "beta": "v1.48.0-dev.21",
+    "beta_date": "2026-10-22T12:59:59Z",
+    "blocked": false,
+    "host": "github",
+    "repo": "MorpheApp/morphe-patches",
+    "stable": "v1.48.0",
+    "stable_date": "2026-10-22T13:14:23Z"
+  },
+  "SysAdminDoc/hushfeed": {
+    "beta": "",
+    "beta_date": "",
+    "blocked": false,
+    "host": "github",
+    "repo": "SysAdminDoc/hushfeed",
+    "stable": "v0.77.0",
+    "stable_date": "2026-10-21T03:30:38Z"
+  },
+  "crimera/piko": {
+    "beta": "v3.10.0-dev.14",
+    "beta_date": "2026-10-10T07:16:09Z",
+    "blocked": false,
+    "host": "github",
+    "repo": "crimera/piko",
+    "stable": "v3.10.0",
+    "stable_date": "2026-10-10T14:58:13Z"
+  }
+}
