@@ -28,7 +28,18 @@ jobs:
           BRANCH="${{ matrix.branch }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          PROTECTED=(.github/configs/patches .github/configs/config.manual.toml README.md .github/scripts/generate_release_notes.py)
+          PROTECTED=(
+            .github/configs/patches
+            .github/configs/config.manual.toml
+            .github/configs/config.stable.updated.json
+            .github/configs/config.beta.updated.json
+            .github/configs/patch_sources.json
+            .github/configs/patch_file_hashes.json
+            README.md
+            .github/scripts/generate_release_notes.py
+            .github/workflows/sync-upstream.yml
+            scripts
+          )
           if git remote get-url upstream >/dev/null 2>&1; then
             git remote set-url upstream "https://github.com/nullcpy/rvb.git"
           else
@@ -61,7 +72,7 @@ jobs:
           #    (tracked file -> keep ours, file we deleted -> stay deleted):
           for f in $(git diff --name-only --diff-filter=U || true); do
             case "$f" in
-              .github/configs/patches/*|.github/configs/config.manual.toml|README.md|.github/scripts/generate_release_notes.py)
+              .github/configs/patches/*|.github/configs/config.manual.toml|.github/configs/config.*.updated.json|.github/configs/patch_*.json|README.md|.github/scripts/generate_release_notes.py|.github/workflows/sync-upstream.yml|scripts/*)
                 if git cat-file -e "HEAD:$f" 2>/dev/null; then
                   git checkout --ours -- "$f"
                 else
