@@ -46,6 +46,7 @@ step's output is the next step's input:
 | Generate configs (JSON) | `ci_generate_configs.sh` | only when `ANYTHING_CHANGED`: writes the pool config each channel will build |
 | Resolve effective triggers | `ci_resolve_triggers.sh` | per-channel `TRIGGER_*` **after** generation, and downgrades a trigger to 0 when the resulting pool has no enabled apps |
 | Notify telegram | `ci_notify_telegram.sh` | raw vs effective triggers, so a suppressed trigger is visible |
+| Notify build queue | `ci_notify_queue.sh` | ONE message on the log topic (`TG_THREAD_NOTIFY`) naming every app this run will actually build: the enabled keys of the regenerated pools, as `📱 Name (brand • variant)` blocks grouped under `[owner/repo/tag](release page)` headers. It reads the **effective** triggers, not the raw ones, so a channel `ci_resolve_triggers.sh` downgraded for want of enabled apps contributes nothing (the watcher is also the last place both pools are visible together — each build job sees only its own config). The tag is the one the build would resolve: the app's own `patches-version`, else the pool's channel, answered from `state/patch_sources.json` the same way `_patch_source_state_tag` answers it; an unanswered keyword is printed as written and left unlinked, never dressed up as a tag. No-op when nothing is enabled |
 | Notify announcements | `ci_notify_announcements.sh` | ONE message on the NullStore announcement topic (`TG_THREAD_ANNOUNCE`) covering both things the watcher can cause: apps added to the config (`new_apps.json`) and apps it woke because their tracked config moved (`changed_apps.json`, printed as the field diff, e.g. `build-mode: apk → both`). No-op when neither has anything; one send per run, not two notices chasing each other |
 | Commit updated state | `commit_data_branch.sh` | pushes **only** `*.json` under `configs/` + `state/` to `data` |
 
@@ -312,6 +313,11 @@ Two delivery models sharing one renderer (`notify_render.sh`) and one target gua
   ONE batched message and prunes exactly the drained prefix. Later queued drains
   find the queue empty and no-op.
 
+The log topic (`TG_THREAD_NOTIFY`) carries two independent messages, not one combined
+report: the build job's per-app failure report and the watcher's build-queue notice are
+sent by different steps, in different runs of the pipeline, and folding them together
+would make a clean build that is about to happen announce nothing.
+
 **No notification script names a chat.** Every `TG_*` target arrives from a
 repository variable, and `tg_require_targets` refuses to send when one is unset:
 the step fails with an `::error::` listing the missing names and no message goes
@@ -338,7 +344,7 @@ the runner's git config.
 | secret | `CODEBERG_TOKEN` | watcher | raises Codeberg/Forgejo rate limits |
 | secret | `TG_TOKEN`, `WEBSITE_DISPATCH_TOKEN` (optional) | notify steps | |
 | var | `APKS_REPO`, `WEBSITE_REPO` | build, cleanup | alternate cache/site repos for forks |
-| var | `TG_CHAT_ID`, `TG_CHAT_ID_BROADCAST`, `TG_THREAD_CI`, `TG_THREAD_STABLE`, `TG_THREAD_BETA`, `TG_THREAD_NOTIFY`, `TG_THREAD_ANNOUNCE` | notifications | the chat handle and every topic ID come from here only, and an unset one fails its notify step (see the target guard above) instead of falling back to a written-in chat; `TG_THREAD_NOTIFY` receives the per-app build/download failure report, `TG_THREAD_ANNOUNCE` is the announcement topic — config additions and config-change rebuild notices together (that step is `continue-on-error`, so an unset one only skips the notice). It replaced `TG_THREAD_NEWAPPS`, which pointed at the same topic under the narrower name |
+| var | `TG_CHAT_ID`, `TG_CHAT_ID_BROADCAST`, `TG_THREAD_CI`, `TG_THREAD_STABLE`, `TG_THREAD_BETA`, `TG_THREAD_NOTIFY`, `TG_THREAD_ANNOUNCE` | notifications | the chat handle and every topic ID come from here only, and an unset one fails its notify step (see the target guard above) instead of falling back to a written-in chat; `TG_THREAD_NOTIFY` is the log topic and receives two separate kinds of message — the per-app build/download failure report, and the watcher's build-queue notice listing what the run resolved to build; `TG_THREAD_ANNOUNCE` is the announcement topic — config additions and config-change rebuild notices together (that step is `continue-on-error`, so an unset one only skips the notice). It replaced `TG_THREAD_NEWAPPS`, which pointed at the same topic under the narrower name |
 | var | `RELEASE_NOTES_DISCORD_LINK`, `RELEASE_NOTES_DONATE_LINK`, `RELEASE_NOTES_WEBSITE_LINK` | build | footer links in the generated release body; the Discord link is omitted when its var is unset, never invented |
 | var | `RVB_MORPHE_PASSTHROUGH` | build | bundle handling escape hatch |
 | var | `RVB_MORPHE_STRIPLIBS` | build | bisect switch for morphe's own `--striplibs`, passed on top of the engine's trim/`zip -d`; `false` patches with the engine strip alone ([build-engine.md](build-engine.md)) |

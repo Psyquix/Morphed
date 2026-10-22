@@ -128,6 +128,25 @@ jobs:
           EFFECTIVE_BETA: ${{ steps.effective_triggers.outputs.TRIGGER_BETA }}
         run: bash .github/scripts/ci_notify_telegram.sh
 
+      - name: Notify build queue
+        if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
+        # ONE message on the log topic naming every app this run will actually build,
+        # grouped by patch source and by the release tag that source resolves to. Reads
+        # the EFFECTIVE triggers rather than the raw ones, because
+        # ci_resolve_triggers.sh has already dropped any channel whose regenerated pool
+        # has no enabled apps - naming such a pool would announce builds nobody starts.
+        # The build jobs cannot report this: each sees only its own pool.
+        # continue-on-error for the same reason as the step above: a notify-config error
+        # must not fail check_patch and block both build jobs.
+        continue-on-error: true
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
+          TG_THREAD_NOTIFY: ${{ vars.TG_THREAD_NOTIFY }}
+          EFFECTIVE_STABLE: ${{ steps.effective_triggers.outputs.TRIGGER_STABLE }}
+          EFFECTIVE_BETA: ${{ steps.effective_triggers.outputs.TRIGGER_BETA }}
+        run: bash .github/scripts/ci_notify_queue.sh
+
       - name: Notify announcements
         if: ${{ steps.flags.outputs.ANYTHING_CHANGED == '1' }}
         # One message on the NullStore announcement topic, separate from the CI
