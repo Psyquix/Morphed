@@ -72,11 +72,15 @@ render_message() {
 
 	else
 		TITLE="$(h "${ISSUE_TITLE}")"
-		# One mark for the whole event type. The circle says "this is an issue" at a
-		# glance down a log channel; the action word after the number already says
-		# whether it opened, closed or reopened, so per-state icons traded the
-		# type signal for information the sentence repeats.
+		# The circle marks the event type — issue, against the pull request's green and
+		# a failed run's red — so it stays readable down a busy log channel, and the
+		# action word after the number carries the state. A closed issue is the single
+		# exception: it gets its own colour, because closing is the one state anyone
+		# scans for.
 		ICON="🟣"
+		if [ "${ACTION:-}" = "closed" ]; then
+			ICON="🔵"
+		fi
 		MSG="$(hlink "${ISSUE_URL}" "${ICON} Issue #${ISSUE_NUM} ${ACTION}") in ${REPO_MD}${NL}"
 		MSG+="  ╰ <code>${TITLE}</code>${NL}"
 		MSG+="  ╰ ${ACTOR_MD}"
