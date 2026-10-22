@@ -62,10 +62,14 @@ DISCORD_FLAGS_NO_EMBEDS=4
 # Measured in the channel, not assumed: text + "\n" shows no gap, text + "\n" + the
 # character alone shows no gap either (the client collapses a single trailing line), and
 # only text + blank line + the character renders as real space. Hence two newlines here.
-# It goes on the LAST message of a mirror only: a notice split across parts is still one
-# notice, and padding between its parts would put the gap in the middle of it.
+#
+# It closes every part of a split notice, not just the last one: the gap between two
+# parts has to be created at the end of the earlier part, because a line padded to the
+# START of a message is trimmed by the client exactly like a trailing bare newline was
+# (measured — leading padding produced no seam at all, trailing padding did). The last
+# part's pad is also the gap that ends the notice.
 DISCORD_TAIL=$(printf '\n\n\342\200\213')
-DISCORD_TAIL_UNITS=3   # what the packer must leave room for
+DISCORD_TAIL_UNITS=3   # what the packer must leave room for, once per part
 
 # Own directory, not SCRIPT_DIR: every send site defines that already, and a sourced
 # library overwriting it would move the caller's own sources to this directory.
@@ -270,28 +274,23 @@ discord_send() {
 	# whole blocks only, and a heading travels with the block under it. The heading
 	# pattern is post-conversion Discord Markdown — both the legacy-Markdown `*x*` and
 	# the release-notes `<b>x</b>` forms have become **x** by now.
-	# Collect the parts before sending any of them, because the closing blank line belongs
-	# after the whole message and not after each of its parts. The limit gives back the
-	# tail's units so the final part cannot cross 2000 once it is appended.
+	# Collect the parts before sending any of them. Each one is closed with the invisible
+	# blank line, which is what creates the gap at the seam that follows it — padding put
+	# at the START of a part is trimmed and does nothing. The limit gives back the tail's
+	# units so no part can cross 2000 once it is padded.
 	local -a pieces=()
-	local piece i
+	local piece
 	while IFS= read -r -d "$PACK_RS" piece; do
 		if [ -n "$piece" ]; then
 			pieces+=("$piece")
 		fi
 	done < <(printf '%s' "$text" | pack_message "$((DISCORD_LIMIT - DISCORD_TAIL_UNITS))" '^\*\*.*\*\*$' _pack_len_units)
 
-	local last=$(( ${#pieces[@]} - 1 ))
-	for i in "${!pieces[@]}"; do
+	for piece in "${pieces[@]}"; do
 		if [ "$posts" -gt 0 ]; then
 			sleep "$DISCORD_PAUSE"
 		fi
-		if [ "$i" = "$last" ]; then
-			piece="${pieces[$i]}${DISCORD_TAIL}"
-		else
-			piece=${pieces[$i]}
-		fi
-		_discord_post_once "$url" "$piece" || rc=1
+		_discord_post_once "$url" "${piece}${DISCORD_TAIL}" || rc=1
 		posts=$((posts + 1))
 	done
 
