@@ -1,4 +1,14 @@
 #!/bin/bash
+# ci_notify_telegram.sh — the watcher's "what moved" notice: patch sources that gained
+# a stable or beta release, repositories that got blocked, and app versions that changed
+# (TG_THREAD_CI).
+#
+# Sent as Telegram HTML, not legacy Markdown, for one reason: legacy Markdown cannot put
+# a link inside a bold run — "*text [a](url) text*" renders literally — so the bundle
+# heading could be a link or it could be bold, never both. HTML nests <b><a></b>, which
+# is what the release notes already do, and it is the grammar every other heading in this
+# system follows. The cost is that interpolated values must be escaped, so jq builds the
+# text through esc/link rather than by dropping strings into the markup.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_targets.sh
@@ -16,6 +26,11 @@ fi
 
 PATCH_SOURCES_JSON=$(cat state/patch_sources.json || echo '{}')
 MSG_BODY=$(jq -rn --argjson new "$TAGS_NEW" --argjson old "$TAGS_OLD" --argjson patches "$PATCH_SOURCES_JSON" '
+  # HTML is markup, so every value that came from a config or a forge goes through esc
+  # first: a repository name carrying "<" or "&" would otherwise open a tag Telegram
+  # cannot parse and the send fails with no useful error.
+  def esc: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+  def link($u; $t): "<a href=\"" + ($u | esc) + "\">" + ($t | esc) + "</a>";
   [ $new | to_entries[] | . as $e
     | ($old[$e.key] // {}) as $o
     | ($e.value.beta // "") as $nb
@@ -27,20 +42,23 @@ MSG_BODY=$(jq -rn --argjson new "$TAGS_NEW" --argjson old "$TAGS_OLD" --argjson 
     # /releases/tag/.
     | (if $host == "gitlab" then "https://gitlab.com/" elif $host == "codeberg" then "https://codeberg.org/" else "https://github.com/" end) as $base
     | (if $host == "gitlab" then "-/releases/" else "releases/tag/" end) as $relpath
-    | "📦 [\($e.value.repo)](\($base)\($e.value.repo))" +
+    | ($e.value.repo // $e.key) as $repo
+    | "<b>📦 " + link($base + $repo; $repo) + "</b>" +
       (if ($e.value.blocked == true and $o.blocked != true) then "\n  ╰ 🚫 Repository access blocked." else "" end) +
       (if ($e.value.blocked != true and $e.value.stable != "" and $e.value.stable != ($o.stable // "")) then
-        "\n  ╰ Stable: [\($e.value.stable)](\($base)\($e.value.repo)/\($relpath)\($e.value.stable))"
+        "\n  ╰ Stable: " + link($base + $repo + "/" + $relpath + $e.value.stable; $e.value.stable)
       else "" end) +
       (if ($e.value.blocked != true and $nb != "" and $nb != $ob) then
-        "\n  ╰ Beta: [\($nb)](\($base)\($e.value.repo)/\($relpath)\($nb))"
+        "\n  ╰ Beta: " + link($base + $repo + "/" + $relpath + $nb; $nb)
       else "" end)
   ] | join("\n\n")
 ')
 
 APP_UPDATES_JSON=$(cat app_updates.json 2>/dev/null || echo '{}')
 APP_UPDATES_MSG=$(jq -r --argjson updates "$APP_UPDATES_JSON" '
-  [ $updates | to_entries[] | . as $e | "📱 \($e.key)\n  ╰ Version: \($e.value.new)" ] | join("\n\n")
+  def esc: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+  [ $updates | to_entries[] | . as $e
+    | "📱 <b>\($e.key | esc)</b>\n  ╰ Version: \(($e.value.new // "") | esc)" ] | join("\n\n")
 ' <<<"{}")
 
 if [ -z "$MSG_BODY" ] && [ -z "$APP_UPDATES_MSG" ]; then
@@ -59,9 +77,9 @@ FULL_MSG=""
 
 if [ -n "$MSG_BODY" ]; then
   if [ "${TRIGGER_STABLE:-0}" = "1" ] || [ "${TRIGGER_BETA:-0}" = "1" ]; then
-    FULL_MSG="*🚨 New Patch(es) Detected!*${NL}${NL}${MSG_BODY}"
+    FULL_MSG="<b>🚨 New Patch(es) Detected!</b>${NL}${NL}${MSG_BODY}"
   else
-    FULL_MSG="*⚠️ Repository Status Update!*${NL}${NL}${MSG_BODY}"
+    FULL_MSG="<b>⚠️ Repository Status Update!</b>${NL}${NL}${MSG_BODY}"
   fi
 fi
 
@@ -69,20 +87,20 @@ if [ -n "$APP_UPDATES_MSG" ]; then
   if [ -n "$FULL_MSG" ]; then
     FULL_MSG="${FULL_MSG}${NL}${NL}"
   fi
-  FULL_MSG="${FULL_MSG}*🚨 New Version(s) Detected!*${NL}${NL}${APP_UPDATES_MSG}"
+  FULL_MSG="${FULL_MSG}<b>🚨 New Version(s) Detected!</b>${NL}${NL}${APP_UPDATES_MSG}"
 fi
 
 if [ "${EFFECTIVE_STABLE:-0}" = "1" ] || [ "${EFFECTIVE_BETA:-0}" = "1" ]; then
   if [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
     ACTION_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-    FULL_MSG="${FULL_MSG}${NL}${NL}⚙️ [View Build in Action](${ACTION_URL})"
+    FULL_MSG="${FULL_MSG}${NL}${NL}⚙️ <a href=\"${ACTION_URL}\">View Build in Action</a>"
   fi
 else
-  FULL_MSG="${FULL_MSG}${NL}${NL}ℹ️ _No apps are enabled. Build skipped._"
+  FULL_MSG="${FULL_MSG}${NL}${NL}<i>ℹ️ No apps are enabled. Build skipped.</i>"
 fi
 
 curl -s -X POST \
-  --data-urlencode "parse_mode=Markdown" \
+  --data-urlencode "parse_mode=HTML" \
   --data-urlencode "disable_web_page_preview=true" \
   --data-urlencode "text=${FULL_MSG}" \
   --data-urlencode "chat_id=${TG_CHAT_ID}" \
@@ -91,5 +109,6 @@ curl -s -X POST \
 
 # The Discord mirror of the same text, last so a mirror failure can never hide the
 # Telegram send above it. Nothing follows, so a rejection here fails the step (the
-# workflow keeps it non-blocking) while an unset webhook is a silent skip.
-discord_send "${DISCORD_WEBHOOK_PATCH_ALERT:-}" "$FULL_MSG"
+# workflow keeps it non-blocking) while an unset webhook is a silent skip. html because
+# that is the dialect the body was just written in.
+discord_send "${DISCORD_WEBHOOK_PATCH_ALERT:-}" "$FULL_MSG" html

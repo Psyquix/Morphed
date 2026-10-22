@@ -45,7 +45,7 @@ step's output is the next step's input:
 | Check Patch App Updates | `ci_check_app_patches.py` | only when `SOURCES_CHANGED`: downloads the changed bundles and hashes them (`state/patch_file_hashes.json`) to find which apps the new patches actually cover |
 | Generate configs (JSON) | `ci_generate_configs.sh` | only when `ANYTHING_CHANGED`: writes the pool config each channel will build |
 | Resolve effective triggers | `ci_resolve_triggers.sh` | per-channel `TRIGGER_*` **after** generation, and downgrades a trigger to 0 when the resulting pool has no enabled apps |
-| Notify telegram | `ci_notify_telegram.sh` | raw vs effective triggers, so a suppressed trigger is visible; mirrored to `DISCORD_WEBHOOK_PATCH_ALERT` ([§Discord mirror](#discord-mirror-notify_discordsh)) |
+| Notify telegram | `ci_notify_telegram.sh` | raw vs effective triggers, so a suppressed trigger is visible; sent as Telegram **HTML** so the bundle heading can be bold *and* linked (legacy Markdown renders `*text [a](url)*` literally), the grammar the release notes already use; mirrored to `DISCORD_WEBHOOK_PATCH_ALERT` ([§Discord mirror](#discord-mirror-notify_discordsh)) |
 | Notify build queue | `ci_notify_queue.sh` | ONE message on the log topic (`TG_THREAD_NOTIFY`) naming every app this run will actually build: the enabled keys of the regenerated pools, as `📱 *Name* (brand • variant)` blocks grouped under `🧩 *owner/repo* ([tag](release page)) · N apps` headers — the same bold-heading grammar the release notes use (the tag is a version, not another path segment, and the parentheses sit outside the link because a `)` ends a `[label](url)` run in both dialects). It reads the **effective** triggers, not the raw ones, so a channel `ci_resolve_triggers.sh` downgraded for want of enabled apps contributes nothing (the watcher is also the last place both pools are visible together — each build job sees only its own config). The tag is the one the build would resolve: the app's own `patches-version`, else the pool's channel, answered from `state/patch_sources.json` the same way `_patch_source_state_tag` answers it. An app with nothing to build from is **not queued and not listed** — a source the snapshot marks `blocked` is skipped by the engine before it resolves any version, and a channel with no tag recorded for that source has no bundle to patch (a stable-only repository therefore contributes no beta line) — each skip is written to the step log so a missing app is explainable. A pool whose every app is filtered out sends nothing. Mirrored to `DISCORD_WEBHOOK_GITHUB_LOG` |
 | Notify announcements | `ci_notify_announcements.sh` | ONE message on the NullStore announcement topic (`TG_THREAD_ANNOUNCE`) covering both things the watcher can cause: apps added to the config (`new_apps.json`) and apps it woke because their tracked config moved (`changed_apps.json`, printed as the field diff, e.g. `build-mode: apk → both`). No-op when neither has anything; one send per run, not two notices chasing each other. Mirrored to `DISCORD_WEBHOOK_GITHUB_LOG` |
 | Commit updated state | `commit_data_branch.sh` | pushes **only** `*.json` under `configs/` + `state/` to `data` |
@@ -379,12 +379,14 @@ issue title containing `@everyone` would otherwise ping the whole server, and
 formality: `[label](url)` unfurls into a preview card on Discord while showing nothing but
 the label in a Telegram topic, so a release note carrying six arch links arrives as six
 stacked images unless the flag is set (measured: the same text yields `embeds: 2` without
-it and `embeds: 0` with it, read back from the created message via `?wait=true`). One
-thing the flag does not cover: a `discord.gg` invite is rendered as a server-invitation
-**component**, not a link embed, and it survived suppression in the release footer — so
-every link target is also wrapped at the text level (`[label](<url>)`, the documented
-form), which stops the unfurl and keeps the label clickable. No notifier body writes a
-bare URL, so that one pass covers every sink.
+it and `embeds: 0` with it, read back from the created message via `?wait=true`). Two
+things the flag does not cover, and neither has a sender-side switch: a `discord.gg`
+invite is rendered as a server-invitation **component** rather than a link embed, and
+`[label](<url>)` — the documented text form that stops ordinary unfurls — does not stop
+that either (measured: the card survived both). So the mirror unwraps every link target to
+the `<url>` form and then **drops the target of an invite link entirely**, keeping the
+word: a join link is worth nothing to a reader already in the server. No notifier body
+writes a bare URL, so that one pass covers every sink.
 
 ### Where a message ends (`notify_pack.sh`)
 
