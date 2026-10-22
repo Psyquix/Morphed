@@ -99,10 +99,16 @@ RVB_HASH_APPEND="$TEMP_DIR/hashes/append.$$.tsv"
 export RVB_DEDUP_MODE RVB_UNCHANGED_DIR RVB_HASH_APPEND
 
 # Attach the captured child log to a build-failure descriptor, keyed by the same
-# slug build_rv used. No-op when the descriptor is absent (clean skip, or the
-# failure happened before the version-resolution point).
+# slug build_rv used. A bundle-unreadable abort (_lb) returned 1 before the plain
+# descriptor existed, so its log belongs to the <slug>_lb.json survivor; a hard
+# abort attaches to <slug>.log; otherwise no-op (clean skip, or a failure the
+# descriptor never recorded).
 _attach_failure_log() { # $1=label $2=log-file
 	local slug; slug=$(failure_slug "$1")
+	if [ -f "$FAILURES_DIR/${slug}_lb.json" ]; then
+		cp "$2" "$FAILURES_DIR/${slug}_lb.log" 2>/dev/null || true
+		return 0
+	fi
 	[ -f "$FAILURES_DIR/$slug.json" ] || return 0
 	cp "$2" "$FAILURES_DIR/$slug.log" 2>/dev/null || true
 }

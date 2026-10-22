@@ -14,15 +14,15 @@
 #     (`_dl`) and is still requested: record it in pending_builds as reason "retry"
 #     with attempts + 1, parking it once it has hit RVB_RETRY_MAX so a genuinely-
 #     unbuildable arch stops being retried every run instead of looping forever.
-#   * every OTHER failure — build abort (`<slug>.json`), patcher abort (`_pf`) and
-#     patch-set rejection (`_np`) — is deliberately NOT retried. A retry re-runs the
-#     same engine over the same inputs and reproduces the same abort, so it spends a
-#     build slot to learn nothing; the fix is a patch-bundle release or a config edit,
-#     and BOTH already force-enable the app through their own trigger (TRIGGER_STABLE /
-#     the watcher's re-arm). Their attempted arches therefore fall into the success
-#     side below: settled into built_shape so neither this queue nor the watcher's
-#     "arch never built -> reason new" path re-nags them every run (ADR 0010). This is
-#     the same settle the `_np` case already relies on.
+#   * every OTHER failure — build abort (`<slug>.json`), patcher abort (`_pf`),
+#     patch-set rejection (`_np`) and bundle-unreadable (`_lb`) — is deliberately NOT
+#     retried. A retry re-runs the same engine over the same inputs and reproduces the
+#     same abort, so it spends a build slot to learn nothing; the fix is a patch-bundle
+#     release or a config edit, and BOTH already force-enable the app through their own
+#     trigger (TRIGGER_STABLE / the watcher's re-arm). Their attempted arches therefore
+#     fall into the success side below: settled into built_shape so neither this queue nor
+#     the watcher's "arch never built -> reason new" path re-nags them every run (ADR
+#     0010). This is the same settle the `_np` case already relies on.
 #
 # Only pool builds (a *.json config) reconcile; a manual TOML run must not mutate
 # the scheduled retry state. A whole-job crash that leaves an attempted app with no
@@ -64,9 +64,10 @@ bs0="$bs"
 pb0="$pb"
 
 # ---- collect retry-eligible arches per app: download-exhaustion records only ----
-# Only `_dl` wakes a retry. Build aborts (`<slug>.json`), patcher aborts (`_pf`) and
-# patch-set rejections (`_np`) are skipped here, so their arches land in the success
-# side of the reconcile below and settle into built_shape instead of re-queueing.
+# Only `_dl` wakes a retry. Build aborts (`<slug>.json`), patcher aborts (`_pf`),
+# patch-set rejections (`_np`) and bundle-unreadable aborts (`_lb`) are skipped here, so
+# their arches land in the success side of the reconcile below and settle into built_shape
+# instead of re-queueing.
 declare -A FAILED
 shopt -s nullglob
 for j in "$FAILDIR"/*.json; do

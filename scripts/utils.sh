@@ -234,11 +234,14 @@ abort() {
 # the CI step consumes them. Kept notification-free on purpose (no Telegram/curl
 # here) so the engine stays pure. A build failure leaves <slug>.json (descriptor)
 # plus <slug>.log (attached by build.sh's parent); a download-exhaustion leaves
-# only <slug>_dl.json; a patch-set rejection leaves only <slug>_np.json; a
-# patcher abort (which skips with rc 0, so the plain descriptor is wiped as a
-# "clean" return) leaves the survivor pair <slug>_pf.json plus <slug>_pf.log —
-# the parent copies the build log onto that name before the sweep. All
-# fail-soft: a write error never aborts a build.
+# only <slug>_dl.json; a patch-set rejection leaves only <slug>_np.json; a patcher
+# abort (which skips with rc 0, so the plain descriptor is wiped as a "clean"
+# return) leaves the survivor pair <slug>_pf.json plus <slug>_pf.log — the parent
+# copies the build log onto that name before the sweep; and a bundle the CLI cannot
+# list at all (list-patches itself aborted, so the build never reaches the version
+# point that writes the plain descriptor) leaves <slug>_lb.json plus <slug>_lb.log —
+# again the parent relocates the captured log onto that name. All fail-soft: a write
+# error never aborts a build.
 #
 # The slug is derived from the display label "$table" (which already carries the
 # arch, e.g. "Foo (arm64-v8a)"), lowercased with every non-alphanumeric run
@@ -311,6 +314,27 @@ write_patch_failure_record() {
 		--arg vc "$4" --arg arch "$5" --arg patches_src "$6" \
 		'{type:$type, app:$app, version:$version, vc:$vc, arch:$arch, patches_src:$patches_src}' \
 		> "$dir/$1_pf.json" 2> /dev/null || true
+}
+
+# write_unlistable_failure_descriptor — record that the patch CLI could not list the
+# patch bundle AT ALL (patches_list itself aborted, e.g. the bundle was built against
+# a different patcher library than the CLI ships, so loading any patch class throws).
+# This is distinct from the _np record above: there the bundle answered and simply had
+# no patch for the candidate versions; here the bundle cannot be interrogated at all,
+# so no version is ever resolved and the build aborts (rc 1) at the version-resolution
+# pre-pass, BEFORE the plain <slug>.json descriptor is written. Without this record the
+# failure is silent to the notification step, which reads only temp/failures. It returns
+# rc 1 (a real abort, not the rc-0 skips of _dl/_np/_pf), so the parent attaches the
+# captured log as <slug>_lb.log rather than deleting a descriptor that was never made.
+# $1=slug $2=app $3=arch $4=patches_src $5=cli_source $6=pkg
+write_unlistable_failure_descriptor() {
+	[ -n "${TEMP_DIR:-}" ] || return 0
+	local dir="$TEMP_DIR/failures"
+	mkdir -p "$dir" 2> /dev/null || return 0
+	jq -n --arg type "bundle_unreadable" --arg app "$2" --arg arch "$3" \
+		--arg patches_src "$4" --arg cli_source "$5" --arg pkg "$6" \
+		'{type:$type, app:$app, arch:$arch, patches_src:$patches_src, cli_source:$cli_source, pkg:$pkg}' \
+		> "$dir/$1_lb.json" 2> /dev/null || true
 }
 
 # clear_patch_failure_record — drop the survivor pair for a build that ultimately
@@ -4987,7 +5011,15 @@ _resolve_list_and_version() {
 	local cli_jar=$1 patches_jar=$2 pkg_name=$3 table=$4 say_pkg=${5:-false}
 	if [ -z "$list_patches" ]; then
 		[ "$say_pkg" = true ] && pr "Package name of '${table}' is '$pkg_name'"
-		list_patches=$(patches_list "$cli_jar" "$patches_jar" "$pkg_name" "${args[cli_source]}") || return 1
+		if ! list_patches=$(patches_list "$cli_jar" "$patches_jar" "$pkg_name" "${args[cli_source]}"); then
+			# The listing tool aborted rather than answered: record it so the CI step can
+			# report the app. Every other return-1 in this function happens once a version is
+			# resolved (the plain descriptor covers it); this one precedes version resolution, so
+			# without an explicit record the abort is invisible to the failure notification.
+			write_unlistable_failure_descriptor "$(failure_slug "$table")" "$table" "${arch_f:-}" \
+				"${args[patches_src]:-${args[cli_source]:-}}" "${args[cli_source]:-}" "$pkg_name"
+			return 1
+		fi
 	fi
 	if [ "$PATCHER_HAS_PATCH_LIST" = true ]; then
 		if ! grep -Fq "$pkg_name" <<<"$list_patches"; then

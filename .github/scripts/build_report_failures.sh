@@ -17,9 +17,16 @@
 #   <slug>_np.json a build the patch set refused for every supported version, so no
 #                  APK was ever fetched (the dl record must not cover it: asking for a
 #                  manual upload of a file nobody wanted is noise)
-# Records are regrouped by app base name and rendered in three parts: a Build
+#   <slug>_lb.json a build whose patch bundle could not be LISTED at all (the CLI's
+#                  list-patches itself aborted, e.g. the bundle was built against a
+#                  different patcher library than the CLI ships). Unlike _np, no version
+#                  is ever resolved, so the build aborts before the plain descriptor is
+#                  written; the parent relocates the captured log to <slug>_lb.log so the
+#                  abort reason (the JVM stack trace) is linkable.
+# Records are regrouped by app base name and rendered in four parts: a Build
 # Failed section (per-arch versionCode + the log link; both the <slug>.json and
-# the <slug>_pf.json survivors land here), a Download Failures section
+# the <slug>_pf.json survivors land here), a Patch Bundle Unreadable section
+# (<slug>_lb.json survivors + the log link), a Download Failures section
 # (per-arch versionCode + search-engine links for the APK) and a Patch Compatibility
 # section (the versions the bundle refused + the bundle link to complain to). Each arch
 # carries its own version so an app that resolved a different version per arch
@@ -94,7 +101,7 @@ declare -A BREC DREC BORDERSET DORDERSET VCFB
 BORDER=""; DORDER=""
 shopt -s nullglob
 for json in "$FAILURES_DIR"/*.json; do
-	case "$json" in *_dl.json | *_np.json | *_pf.json) continue ;; esac
+	case "$json" in *_dl.json | *_np.json | *_pf.json | *_lb.json) continue ;; esac
 	slug="$(basename "${json%.json}")"
 	# A cascaded case (download exhausted, or the patch set refused, then the build
 	# itself failed) is reported once, as the build failure; drop its twins.
@@ -191,6 +198,37 @@ for json in "$FAILURES_DIR"/*_np.json; do
 	NREC[$base]+="${arch}|${ver}|${vc}||${patches}|${pkg}|${patch_url}${NL}"
 	[ -z "${NORDERSET[$base]:-}" ] && { NORDER+="${base}${NL}"; NORDERSET[$base]=1; }
 done
+
+# Bundle-unreadable rejections: the CLI could not list the bundle at all, so no version
+# was ever resolved and there is nothing to hunt for or complain about per version. Like
+# the build/_pf case the reason lives in the captured log, uploaded here as <slug>_lb.log
+# (build.sh relocates it); unlike _np the section names the CLI too, because the mismatch
+# is between the CLI's patcher library and the bundle.
+declare -A LREC LORDERSET
+LORDER=""
+for json in "$FAILURES_DIR"/*_lb.json; do
+	slug="$(basename "${json%.json}")"          # "<slug>_lb"
+	base_log="${slug%_lb}"                      # "<slug>"
+	app="$(jq -r '.app // empty' "$json")"
+	arch="$(jq -r '.arch // empty' "$json")"
+	patches="$(jq -r '.patches_src // empty' "$json")"
+	cli="$(jq -r '.cli_source // empty' "$json")"
+	logurl=""
+	# The relocated <slug>_lb.log is "<slug>_lb" + ".log" = $slug.log; the serial tee
+	# log basename <slug>.log is the fallback.
+	for _lbl in "$FAILURES_DIR/${slug}.log" "$FAILURES_DIR/${base_log}.log"; do
+		if [ -f "$_lbl" ]; then
+			link="$(curl -sS --data-binary "@$_lbl" "$XIPE_URL_BASE/" 2> /dev/null || true)"
+			case "$link" in "$XIPE_URL_BASE/"*) logurl="$link" ;; esac
+			break
+		fi
+	done
+	base="$(app_base "$app" "$arch")"
+	# Columns match render_app_group's read (arch|ver|vc|log|patches|cli|patch_url);
+	# ver/vc are empty (none was resolved) and the 6th column carries the cli_source.
+	LREC[$base]+="${arch}|||${logurl}|${patches}|${cli}|${NL}"
+	[ -z "${LORDERSET[$base]:-}" ] && { LORDER+="${base}${NL}"; LORDERSET[$base]=1; }
+done
 shopt -u nullglob
 
 # arch_token <ver> <vc> — the `v<version> (<versionCode>)` code span for one arch
@@ -209,22 +247,28 @@ search_links() { # $1=pkg $2=base $3=ver(label, maybe 'vX')
 	printf 'Search [Google](https://www.google.com/search?q=%s) / [DuckDuckGo](https://duckduckgo.com/?q=%s) / [Brave](https://search.brave.com/search?q=%s)' "$enc" "$enc" "$enc"
 }
 
-# render_app_group <base> <blob> <mode build|dl|np> — one grouped app block. All
-# modes list each arch as "arch `vX (vc)`: <link>"; build links the log, download links
-# the search engines, np links the patch bundle that refused the versions. Build adds a
-# Patches line naming the failing bundle.
+# render_app_group <base> <blob> <mode build|lb|dl|np> — one grouped app block. All
+# modes list each arch as "arch `vX (vc)`: <link>"; build and lb link the log, download
+# links the search engines, np links the patch bundle that refused the versions. Build and
+# lb add a Patches line naming the failing bundle; lb additionally names the CLI, since
+# an unreadable bundle is a CLI↔bundle mismatch.
 render_app_group() { # $1=base $2=blob $3=mode
-	local base=$1 blob=$2 mode=$3 out arch ver vc log patches pkg patch_url tok links
+	local base=$1 blob=$2 mode=$3 out arch ver vc log patches pkg patch_url tok links cli
 	out="📱 *$(md_clean "$base")*"
-	if [ "$mode" = build ]; then
+	if [ "$mode" = build ] || [ "$mode" = lb ]; then
 		patches=$(uniq_col 5 "$blob" | head -1)
 		[ -n "$patches" ] && out+="${NL}  ╰ Patches: [$(md_clean "$patches")](https://github.com/$patches)"
-		[ -n "${VCFB[$base]:-}" ] && out+="${NL}  ╰ version-code arch fallback already tried; genuine incompatibility (not retried)"
+		if [ "$mode" = lb ]; then
+			cli=$(uniq_col 6 "$blob" | head -1)
+			[ -n "$cli" ] && out+="${NL}  ╰ CLI: [$(md_clean "$cli")](https://github.com/$cli)"
+		else
+			[ -n "${VCFB[$base]:-}" ] && out+="${NL}  ╰ version-code arch fallback already tried; genuine incompatibility (not retried)"
+		fi
 	fi
 	while IFS='|' read -r arch ver vc log patches pkg patch_url; do
 		[ -z "$arch" ] && continue
 		tok="$(arch_token "$ver" "$vc")"
-		if [ "$mode" = build ]; then
+		if [ "$mode" = build ] || [ "$mode" = lb ]; then
 			[ -z "$log" ] && { out+="${NL}  ╰ ${arch}${tok:+ ${tok}}"; continue; }
 			links="[Log](${log})"
 		elif [ "$mode" = np ]; then
@@ -247,16 +291,22 @@ render_app_group() { # $1=base $2=blob $3=mode
 	printf '%s' "$out"
 }
 
-# ---- Assemble the three parts ----
+# ---- Assemble the four parts ----
 # Render each app block first and count only the ones that produce output, so a
 # part never prints its "(N apps)" header over an empty body.
-build_body=""; dl_body=""; np_body=""; cbuild=0; cdl=0; cnp=0
+build_body=""; lb_body=""; dl_body=""; np_body=""; cbuild=0; clb=0; cdl=0; cnp=0
 while IFS= read -r base; do
 	[ -z "$base" ] && continue
 	blk="$(render_app_group "$base" "${BREC[$base]}" build)"
 	[ -z "${blk//[[:space:]]/}" ] && continue
 	build_body+="${blk}${NL}${NL}"; cbuild=$((cbuild + 1))
 done <<< "$BORDER"
+while IFS= read -r base; do
+	[ -z "$base" ] && continue
+	blk="$(render_app_group "$base" "${LREC[$base]:-}" lb)"
+	[ -z "${blk//[[:space:]]/}" ] && continue
+	lb_body+="${blk}${NL}${NL}"; clb=$((clb + 1))
+done <<< "$LORDER"
 while IFS= read -r base; do
 	[ -z "$base" ] && continue
 	blk="$(render_app_group "$base" "${NREC[$base]:-}" np)"
@@ -270,7 +320,7 @@ while IFS= read -r base; do
 	dl_body+="${blk}${NL}${NL}"; cdl=$((cdl + 1))
 done <<< "$DORDER"
 
-if [ "$cbuild" = 0 ] && [ "$cdl" = 0 ] && [ "$cnp" = 0 ]; then
+if [ "$cbuild" = 0 ] && [ "$clb" = 0 ] && [ "$cdl" = 0 ] && [ "$cnp" = 0 ]; then
 	echo "Failure records present but nothing renderable; no report sent."
 	exit 0
 fi
@@ -282,6 +332,10 @@ MSG=""
 # one line under the last app, and sections are joined by a single blank line.
 if [ "$cbuild" -gt 0 ]; then
 	MSG+="*🚨 Build Failed (${cbuild} app$([ "$cbuild" = 1 ] && echo '' || echo 's'))*${NL}${NL}$(printf '%s' "$build_body")${NL}${NL}⚠️ Report the issue to the patch author with the log link."
+fi
+if [ "$clb" -gt 0 ]; then
+	[ -n "$MSG" ] && MSG+="${NL}${NL}"
+	MSG+="*🚫 Patch Bundle Unreadable (${clb} app$([ "$clb" = 1 ] && echo '' || echo 's'))*${NL}${NL}$(printf '%s' "$lb_body")${NL}${NL}⚠️ The patch CLI could not list this bundle at all — the CLI's patcher library and the bundle do not match (see log). Pin the bundle to a version the CLI reads, or use a CLI built for it."
 fi
 if [ "$cnp" -gt 0 ]; then
 	[ -n "$MSG" ] && MSG+="${NL}${NL}"

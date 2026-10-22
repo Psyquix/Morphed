@@ -167,17 +167,21 @@ Step order, with the reason each is where it is:
 7b. **Report build failures** (`build_report_failures.sh`, `if: always()`,
    `continue-on-error`): reads `temp/failures/`, uploads each build log to
    `xi.pe`, and posts ONE batched Markdown message to the failure topic
-   (`TG_THREAD_NOTIFY`, mirrored to `DISCORD_WEBHOOK_GITHUB_LOG`) in up to three
+   (`TG_THREAD_NOTIFY`, mirrored to `DISCORD_WEBHOOK_GITHUB_LOG`) in up to four
    sections — apps that failed to **build**
    (`<slug>.json`, with the log link and patch source), apps where **the patcher
    itself aborted** (`<slug>_pf.json` + `<slug>_pf.log`: the engine skips with rc 0,
    so the plain descriptor is wiped as a clean return and only this survivor pair
-   reaches the report; rendered in the same Build Failed section), apps the patch set
+   reaches the report; rendered in the same Build Failed section), apps whose **patch
+   bundle the CLI could not even list** (`<slug>_lb.json` + `<slug>_lb.log`: `list-patches`
+   itself aborted — usually a CLI↔bundle patcher-version mismatch — so no version is ever
+   resolved and the build aborts before the plain descriptor exists; rendered in a Patch
+   Bundle Unreadable section naming both the bundle and the CLI), apps the patch set
    **refused for every supported version** (`<slug>_np.json`: the tried versions and
    the bundle link, and deliberately no APK search links, since nothing was ever
    fetched), and apps whose **download sources were all exhausted**
    (`<slug>_dl.json`, a request to upload the APK to the cache repo manually), plus a
-   link to the run. A slug that has a build record has its `_dl`/`_np`/`_pf` twins
+   link to the run. A slug that has a build record has its `_dl`/`_np`/`_pf`/`_lb` twins
    dropped, so an app is reported once. When it sends, it sets the job output
    `reported_failures=true`, which
    `trigger_notify_failure` forwards as `already_reported` so
@@ -188,8 +192,9 @@ Step order, with the reason each is where it is:
    `state/built_shape.json` + `state/pending_builds.json` for this channel. **Only
    download exhaustion (`_dl`) is retried**: a `_dl` arch still requested is re-queued
    as a retry and parked once it hits `RVB_RETRY_MAX`. Every other failure class — a
-   build abort (`<slug>.json`), a patcher abort (`_pf`) and a patch-set rejection
-   (`_np`) — is **settled, not retried**: re-running the same engine over the same
+   build abort (`<slug>.json`), a patcher abort (`_pf`), a patch-set rejection (`_np`)
+   and a bundle-unreadable abort (`_lb`) — is **settled, not retried**: re-running the
+   same engine over the same
    inputs reproduces the same abort, so it spends a build slot to learn nothing. The
    fix for those is a patch-bundle release or a config edit, and both already
    re-trigger the app independently (`TRIGGER_STABLE` / the watcher's re-arm), so the

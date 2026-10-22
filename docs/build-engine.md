@@ -30,9 +30,9 @@ Once `build_rv` has a resolved version it writes `temp/failures/<slug>.json`
 the display label, so `<slug>` (= label lowercased, non-alphanumerics collapsed
 to `-`) is identical in the pooled child, the serial parent and the CI step.
 The retry writer (`build_update_retry_list.sh`) re-queues **only** the download-
-exhaustion record below; a build abort, a patcher abort and a patch-set rejection
-are settled, not retried, because a retry reproduces the same abort — see
-[ci-pipelines.md](ci-pipelines.md#the-build-job-buildyml).
+exhaustion record below; a build abort, a patcher abort, a patch-set rejection and a
+bundle-unreadable abort are settled, not retried, because a retry reproduces the same
+abort — see [ci-pipelines.md](ci-pipelines.md#the-build-job-buildyml).
 - **Build failure** — if the app then aborts, the parent copies that child's log
   to `temp/failures/<slug>.log` alongside the descriptor. A clean return deletes
   both. Serial mode `tee`s the build output to the same path so a single job also
@@ -49,6 +49,18 @@ are settled, not retried, because a retry reproduces the same abort — see
   means the opposite: no source failed and no APK is missing, the patch set has
   nothing to apply for this version set or this arch, so the report names the bundle
   instead of asking for an upload ([decisions/0009](decisions/0009-effective-patch-set-decides-compatibility.md)).
+- **Bundle unreadable** — the patch CLI could not **list** the bundle at all: `list-patches`
+  itself aborted (run 39786888211: `MorpheApp/morphe-patches v1.48.0`, compiled against
+  `morphe-patcher 2.0.0`, loaded by the `morphe-desktop v1.18.1` CLI that still ships
+  `morphe-patcher 1.15.1` — every patch class static-init throws `NoSuchMethodError` on
+  `Fingerprint.<init>`). Unlike the `_np` case the bundle never answers, so no version is
+  resolved and `build_rv` aborts with rc 1 inside `_resolve_list_and_version`, **before**
+  the plain `<slug>.json` descriptor is written — which left the app invisible to the report
+  entirely. It now writes `temp/failures/<slug>_lb.json` (`app`, `arch`, `patches_src`,
+  `cli_source`, `pkg`) and the parent relocates the captured log to `<slug>_lb.log`, so the
+  stack trace is linkable; the report renders a **Patch Bundle Unreadable** section naming
+  both the bundle and the CLI (the mismatch is between the two). Like the others it is
+  settled, not retried: only a matching CLI release or a bundle pin fixes it.
 - **Patcher abort** — the patch set loaded, the APK was fetched, and the patcher
   itself aborted (`Patching aborted`): `build_rv` also skips with rc 0, which used to
   wipe the app's `<slug>.json` as a clean return and report nothing (run 39199799796:
