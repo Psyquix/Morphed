@@ -11,12 +11,15 @@
 # next drain instead of being wiped.
 #
 # Env: TG_TOKEN TG_CHAT_ID TG_THREAD_NOTIFY
+#      DISCORD_WEBHOOK_GITHUB_LOG (optional mirror, see notify_discord.sh)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_queue.sh
 source "$SCRIPT_DIR/notify_queue.sh"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 
 TG_LIMIT=4096
 NL=$'\n'
@@ -95,6 +98,13 @@ done <<< "$MSG"
 if [ -n "$CHUNK" ]; then
 	send_chunk "$CHUNK" || exit 1
 fi
+
+# The mirror is best-effort HERE, and that is deliberate: a non-zero after the
+# Telegram chunks have gone out would skip the prune below, the queue would keep its
+# lines and the next drain would re-post the whole batch to Telegram so that a
+# Discord hiccup could be repaired. Losing one copy in the log channel is the smaller
+# error than duplicating every alert in the group.
+discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG" || true
 
 # Sends succeeded → prune the drained lines. The queue is append-only (FIFO), so
 # the lines just drained are always a prefix of the current file; drop exactly

@@ -45,9 +45,9 @@ step's output is the next step's input:
 | Check Patch App Updates | `ci_check_app_patches.py` | only when `SOURCES_CHANGED`: downloads the changed bundles and hashes them (`state/patch_file_hashes.json`) to find which apps the new patches actually cover |
 | Generate configs (JSON) | `ci_generate_configs.sh` | only when `ANYTHING_CHANGED`: writes the pool config each channel will build |
 | Resolve effective triggers | `ci_resolve_triggers.sh` | per-channel `TRIGGER_*` **after** generation, and downgrades a trigger to 0 when the resulting pool has no enabled apps |
-| Notify telegram | `ci_notify_telegram.sh` | raw vs effective triggers, so a suppressed trigger is visible |
-| Notify build queue | `ci_notify_queue.sh` | ONE message on the log topic (`TG_THREAD_NOTIFY`) naming every app this run will actually build: the enabled keys of the regenerated pools, as `📱 Name (brand • variant)` blocks grouped under `[owner/repo/tag](release page)` headers. It reads the **effective** triggers, not the raw ones, so a channel `ci_resolve_triggers.sh` downgraded for want of enabled apps contributes nothing (the watcher is also the last place both pools are visible together — each build job sees only its own config). The tag is the one the build would resolve: the app's own `patches-version`, else the pool's channel, answered from `state/patch_sources.json` the same way `_patch_source_state_tag` answers it. An app with nothing to build from is **not queued and not listed** — a source the snapshot marks `blocked` is skipped by the engine before it resolves any version, and a channel with no tag recorded for that source has no bundle to patch (a stable-only repository therefore contributes no beta line) — each skip is written to the step log so a missing app is explainable. A pool whose every app is filtered out sends nothing |
-| Notify announcements | `ci_notify_announcements.sh` | ONE message on the NullStore announcement topic (`TG_THREAD_ANNOUNCE`) covering both things the watcher can cause: apps added to the config (`new_apps.json`) and apps it woke because their tracked config moved (`changed_apps.json`, printed as the field diff, e.g. `build-mode: apk → both`). No-op when neither has anything; one send per run, not two notices chasing each other |
+| Notify telegram | `ci_notify_telegram.sh` | raw vs effective triggers, so a suppressed trigger is visible; mirrored to `DISCORD_WEBHOOK_PATCH_ALERT` ([§Discord mirror](#discord-mirror-notify_discordsh)) |
+| Notify build queue | `ci_notify_queue.sh` | ONE message on the log topic (`TG_THREAD_NOTIFY`) naming every app this run will actually build: the enabled keys of the regenerated pools, as `📱 Name (brand • variant)` blocks grouped under `[owner/repo/tag](release page)` headers. It reads the **effective** triggers, not the raw ones, so a channel `ci_resolve_triggers.sh` downgraded for want of enabled apps contributes nothing (the watcher is also the last place both pools are visible together — each build job sees only its own config). The tag is the one the build would resolve: the app's own `patches-version`, else the pool's channel, answered from `state/patch_sources.json` the same way `_patch_source_state_tag` answers it. An app with nothing to build from is **not queued and not listed** — a source the snapshot marks `blocked` is skipped by the engine before it resolves any version, and a channel with no tag recorded for that source has no bundle to patch (a stable-only repository therefore contributes no beta line) — each skip is written to the step log so a missing app is explainable. A pool whose every app is filtered out sends nothing. Mirrored to `DISCORD_WEBHOOK_GITHUB_LOG` |
+| Notify announcements | `ci_notify_announcements.sh` | ONE message on the NullStore announcement topic (`TG_THREAD_ANNOUNCE`) covering both things the watcher can cause: apps added to the config (`new_apps.json`) and apps it woke because their tracked config moved (`changed_apps.json`, printed as the field diff, e.g. `build-mode: apk → both`). No-op when neither has anything; one send per run, not two notices chasing each other. Mirrored to `DISCORD_WEBHOOK_GITHUB_LOG` |
 | Commit updated state | `commit_data_branch.sh` | pushes **only** `*.json` under `configs/` + `state/` to `data` |
 
 Two design rules worth preserving:
@@ -167,7 +167,8 @@ Step order, with the reason each is where it is:
 7b. **Report build failures** (`build_report_failures.sh`, `if: always()`,
    `continue-on-error`): reads `temp/failures/`, uploads each build log to
    `xi.pe`, and posts ONE batched Markdown message to the failure topic
-   (`TG_THREAD_NOTIFY`) in up to three sections — apps that failed to **build**
+   (`TG_THREAD_NOTIFY`, mirrored to `DISCORD_WEBHOOK_GITHUB_LOG`) in up to three
+   sections — apps that failed to **build**
    (`<slug>.json`, with the log link and patch source), apps where **the patcher
    itself aborted** (`<slug>_pf.json` + `<slug>_pf.log`: the engine skips with rc 0,
    so the plain descriptor is wiped as a clean return and only this survivor pair
@@ -255,7 +256,9 @@ Step order, with the reason each is where it is:
     merge changed it; a failed data push is a warning, not a failure — the next
     run's fetch converges and the worst case is one redundant republish).
 17. `build_notify_telegram.sh` posts the release to the channel's thread and to the
-    broadcast channel. `continue-on-error`: the chat, the channel and the topic come
+    broadcast channel, and mirrors the release text once to
+    `DISCORD_WEBHOOK_BUILDER_LOG` (stable and beta share that one channel).
+    `continue-on-error`: the chat, the channel and the topic come
     from variables only (no built-in handle), so an unset one fails this step — but
     the step runs last, after publishing, and a notification-config error must not
     turn a run whose files are already live into a failed build.
@@ -330,6 +333,43 @@ fork with no token still exits 0 quietly) and after each script's own "nothing t
 send" early exit, so a clean run never fails over config nobody needed; a failed
 drain leaves its queue lines on the branch for the next attempt.
 
+### Discord mirror (`notify_discord.sh`)
+
+Telegram is the author of every notification body and stays the result the run reports
+on. Discord is a **mirror**: each send site calls `discord_send` once with the same text,
+**as the script's last statement**, so a mirror problem can never hide the Telegram
+result above it. Sinks are per Discord channel and addressed by webhook URL —
+`DISCORD_WEBHOOK_PATCH_ALERT` for the watcher's patch/version notice,
+`DISCORD_WEBHOOK_GITHUB_LOG` for the log topic's four message kinds plus the
+announcements, `DISCORD_WEBHOOK_BUILDER_LOG` for the release text (one copy, whatever
+Telegram topic and broadcast channel it also went to).
+
+Two rules that are easy to get wrong and are enforced in the library, not at the sites:
+
+- **Message size is counted in UTF-16 code units, not characters.** Discord charges 2000
+  units and `bash` counts a leading emoji as one character while the API charges it as
+  two, so a char-counted budget can be twice too generous and the post is rejected. The
+  library prices each line with one `jq` pass (`_discord_units`) and packs whole lines,
+  so a `[label](url)` is never broken to make it fit; a line longer than the limit on its
+  own (a signed CDN link) is folded at its last space, then hard-cut, because losing the
+  notice to preserve one URL is the worse failure. The dialect shift (`*x*` → `**x**`,
+  `<b>` → `**`, `&amp;` → `&`) runs under `LC_ALL=C` for the same byte-vs-character
+  reason: under a UTF-8 locale `sed` mis-matches the emoji that leads every header.
+- **A copy must not break a resend contract.** `notify_drain.sh` is the one site that
+  treats a mirror failure as best-effort (`|| true`): a non-zero there would skip the
+  prune, the queue would keep its lines, and the next drain would re-post the whole batch
+  to Telegram to repair a Discord hiccup. Every other site has no such contract, so it
+  propagates the failure and the step shows red.
+
+An unset webhook is a **skip**, not a configuration error — unlike `TG_CHAT_ID`, whose
+absence is an error precisely because a *default* chat exists to be wrong about. Here the
+URL is both the destination and the credential, so there is nothing to guess: no channel
+means that sink is not mirrored, and a fork holding neither credential stays silent. The
+URL therefore lives in repository **secrets** (it carries its token), never in a variable
+and never in a file in this repo, and it is deliberately absent from every log line the
+library writes. `allowed_mentions: {parse: []}` is sent on every message, because a PR or
+issue title containing `@everyone` would otherwise ping the whole server.
+
 The queue is append-only and every plumbing call pins `core.autocrlf=false` /
 `core.eol=lf`, so the JSONL bytes (and the drain's prefix prune) do not depend on
 the runner's git config.
@@ -343,6 +383,7 @@ the runner's git config.
 | secret | `APKS_REPO_TOKEN` | build, cleanup | cross-repo write to `nullcpy/apks`, doubles as dispatch token |
 | secret | `CODEBERG_TOKEN` | watcher | raises Codeberg/Forgejo rate limits |
 | secret | `TG_TOKEN`, `WEBSITE_DISPATCH_TOKEN` (optional) | notify steps | |
+| secret | `DISCORD_WEBHOOK_PATCH_ALERT`, `DISCORD_WEBHOOK_GITHUB_LOG`, `DISCORD_WEBHOOK_BUILDER_LOG` (optional) | notify steps | per-channel Discord mirrors; unset means that sink is not mirrored ([§Discord mirror](#discord-mirror-notify_discordsh)) |
 | var | `APKS_REPO`, `WEBSITE_REPO` | build, cleanup | alternate cache/site repos for forks |
 | var | `TG_CHAT_ID`, `TG_CHAT_ID_BROADCAST`, `TG_THREAD_CI`, `TG_THREAD_STABLE`, `TG_THREAD_BETA`, `TG_THREAD_NOTIFY`, `TG_THREAD_ANNOUNCE` | notifications | the chat handle and every topic ID come from here only, and an unset one fails its notify step (see the target guard above) instead of falling back to a written-in chat; `TG_THREAD_NOTIFY` is the log topic and receives two separate kinds of message — the per-app build/download failure report, and the watcher's build-queue notice listing what the run resolved to build; `TG_THREAD_ANNOUNCE` is the announcement topic — config additions and config-change rebuild notices together (that step is `continue-on-error`, so an unset one only skips the notice). It replaced `TG_THREAD_NEWAPPS`, which pointed at the same topic under the narrower name |
 | var | `RELEASE_NOTES_DISCORD_LINK`, `RELEASE_NOTES_DONATE_LINK`, `RELEASE_NOTES_WEBSITE_LINK` | build | footer links in the generated release body; the Discord link is omitted when its var is unset, never invented |

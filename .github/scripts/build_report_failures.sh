@@ -31,6 +31,7 @@
 #
 # Env: TG_TOKEN TG_CHAT_ID TG_THREAD_NOTIFY APKS_REPO
 #      GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID GITHUB_OUTPUT
+#      DISCORD_WEBHOOK_GITHUB_LOG (optional mirror, see notify_discord.sh)
 # TG_CHAT_ID and TG_THREAD_NOTIFY come from repository variables only: with no
 # built-in handle, an unset one fails this step (reported_failures stays unset,
 # so ci.yml still raises its generic alert) rather than posting to a stale chat.
@@ -38,6 +39,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 
 NL=$'\n'
 FAILURES_DIR="temp/failures"
@@ -324,3 +327,8 @@ fi
 if [ "$sent" = 1 ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
 	echo "reported_failures=true" >> "$GITHUB_OUTPUT"
 fi
+
+# Mirror last, and never as a failure of this step: the report's own delivery is the
+# thing that decides reported_failures above, this is a copy. discord_send still
+# prints what Discord said.
+discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG" || true

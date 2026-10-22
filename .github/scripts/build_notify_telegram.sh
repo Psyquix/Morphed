@@ -3,6 +3,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 NL=$'\n'
 
 if [ -z "${TG_TOKEN:-}" ]; then
@@ -85,3 +87,9 @@ done <<< "$MSG"
 if [ -n "$CHUNK" ]; then
   send_chunk "$CHUNK"
 fi
+
+# One mirror of the whole note, after the Telegram loop: that loop already posts each
+# chunk twice (group topic and broadcast channel), and Discord has one channel for the
+# release text, so it is handed the complete body and splits it by its own 2000-char
+# limit rather than reusing the Telegram chunks.
+discord_send "${DISCORD_WEBHOOK_BUILDER_LOG:-}" "$MSG" html

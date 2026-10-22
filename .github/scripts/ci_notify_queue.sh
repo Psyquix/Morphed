@@ -37,6 +37,7 @@
 # Env: TG_TOKEN TG_CHAT_ID TG_THREAD_NOTIFY EFFECTIVE_STABLE EFFECTIVE_BETA
 #      RVB_PATCH_SOURCES_JSON (snapshot path override, as the engine's helper has)
 #      GITHUB_SERVER_URL GITHUB_REPOSITORY GITHUB_RUN_ID
+#      DISCORD_WEBHOOK_GITHUB_LOG (optional mirror, see notify_discord.sh)
 # TG_CHAT_ID and TG_THREAD_NOTIFY come from repository variables only: with no built-in
 # handle or topic, an unset one fails this step instead of posting somewhere stale (see
 # notify_targets.sh).
@@ -46,6 +47,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/retry_lib.sh"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 
 NL=$'\n'
 # \x1f (unit separator) is the record delimiter, never a tab: tab is IFS *whitespace*,
@@ -294,6 +297,10 @@ tg_require_targets \
 # ---- Assemble the message: group header, then its app blocks sorted by key ----
 CHUNK=""
 SENT=0
+# The queue notice is emitted as a stream of Telegram chunks, so the mirror keeps
+# its own copy of what went out and hands Discord the whole notice once at the end:
+# the two services count message size differently and each must do its own splitting.
+MIRROR=""
 
 send_chunk() {
 	local text=${1:-} resp
@@ -311,6 +318,11 @@ send_chunk() {
 	if ! grep -q '"ok":true' <<<"$resp"; then
 		echo "::error::Telegram rejected a build-queue chunk: ${resp}" >&2
 		return 1
+	fi
+	if [ -n "$MIRROR" ]; then
+		MIRROR+="${NL}${NL}${text}"
+	else
+		MIRROR=$text
 	fi
 	SENT=1
 }
@@ -404,3 +416,6 @@ flush_chunk
 if [ "$SENT" = 1 ]; then
 	echo "Build-queue notification sent (${ngrp} patch group(s), topic ${TG_THREAD_NOTIFY})."
 fi
+
+# Mirror after the summary, so the Telegram result is always reported first.
+discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MIRROR"

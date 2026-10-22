@@ -29,12 +29,15 @@
 #
 # Env: TG_TOKEN TG_CHAT_ID TG_THREAD_ANNOUNCE WEBSITE_LINK (chat + topic come from
 #      repo variables only, per notify_targets.sh; no hardcoded handle/topic).
+#      DISCORD_WEBHOOK_GITHUB_LOG (optional mirror, see notify_discord.sh)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=retry_lib.sh
 source "$SCRIPT_DIR/retry_lib.sh"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 
 NA="new_apps.json"
 CA="changed_apps.json"
@@ -242,3 +245,6 @@ curl -s -X POST \
 	"https://api.telegram.org/bot${TG_TOKEN}/sendMessage" >/dev/null || true
 
 echo "Announcement sent (${new_count:-0} new, ${chg_count:-0} changed) to topic ${TG_THREAD_ANNOUNCE}."
+
+# Mirror after the summary line, so the Telegram result is always reported first.
+discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG"

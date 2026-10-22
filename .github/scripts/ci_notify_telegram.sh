@@ -3,6 +3,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 
 if [ -z "${TG_TOKEN:-}" ]; then
   echo "TG_TOKEN is not set. Skipping Telegram notification."
@@ -86,3 +88,8 @@ curl -s -X POST \
   --data-urlencode "chat_id=${TG_CHAT_ID}" \
   --data-urlencode "message_thread_id=${TG_THREAD_CI}" \
   "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" > /dev/null
+
+# The Discord mirror of the same text, last so a mirror failure can never hide the
+# Telegram send above it. Nothing follows, so a rejection here fails the step (the
+# workflow keeps it non-blocking) while an unset webhook is a silent skip.
+discord_send "${DISCORD_WEBHOOK_PATCH_ALERT:-}" "$FULL_MSG"

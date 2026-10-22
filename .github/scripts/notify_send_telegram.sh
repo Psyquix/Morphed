@@ -8,12 +8,15 @@
 # detailed per-app build report already covered that run).
 #
 # Env: TG_TOKEN TG_CHAT_ID TG_THREAD_ID WF_NAME ALREADY_REPORTED + render inputs.
+#      DISCORD_WEBHOOK_GITHUB_LOG (optional mirror, see notify_discord.sh)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_render.sh
 source "$SCRIPT_DIR/notify_render.sh"
 # shellcheck source=notify_targets.sh
 source "$SCRIPT_DIR/notify_targets.sh"
+# shellcheck source=notify_discord.sh
+source "$SCRIPT_DIR/notify_discord.sh"
 
 if [ -z "${TG_TOKEN:-}" ]; then
 	echo "TG_TOKEN is not set. Skipping Telegram notification."
@@ -42,3 +45,7 @@ curl -s -X POST \
 	--data-urlencode "chat_id=${TG_CHAT_ID}" \
 	--data-urlencode "message_thread_id=${TG_THREAD_ID}" \
 	"https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
+
+# Mirror last: the generic alert is the least important message in the system and a
+# copy of it must never be the reason the Telegram send is not reported.
+discord_send "${DISCORD_WEBHOOK_GITHUB_LOG:-}" "$MSG"

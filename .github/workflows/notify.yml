@@ -68,6 +68,9 @@ jobs:
       # lines, so the next drain retries once the variables exist.
       TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
       TG_THREAD_NOTIFY: ${{ vars.TG_THREAD_NOTIFY }}
+      # Optional Discord mirror of the drained batch (#github-log). It is never the
+      # reason the queue stays unpruned: notify_drain.sh treats it as best-effort.
+      DISCORD_WEBHOOK_GITHUB_LOG: ${{ secrets.DISCORD_WEBHOOK_GITHUB_LOG }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -94,6 +97,7 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
           TG_THREAD_ID: ${{ vars.TG_THREAD_NOTIFY }}
+          DISCORD_WEBHOOK_GITHUB_LOG: ${{ secrets.DISCORD_WEBHOOK_GITHUB_LOG }}
           WF_NAME: ${{ inputs.workflow_name }}
           ALREADY_REPORTED: ${{ inputs.already_reported }}
           ACTOR: ${{ github.actor }}
