@@ -72,11 +72,11 @@ render_message() {
 
 	else
 		TITLE="$(h "${ISSUE_TITLE}")"
-		case "${ACTION:-}" in
-		closed) ICON="✅" ;;
-		reopened) ICON="🔄" ;;
-		*) ICON="🐛" ;;
-		esac
+		# One mark for the whole event type. The circle says "this is an issue" at a
+		# glance down a log channel; the action word after the number already says
+		# whether it opened, closed or reopened, so per-state icons traded the
+		# type signal for information the sentence repeats.
+		ICON="🟣"
 		MSG="$(hlink "${ISSUE_URL}" "${ICON} Issue #${ISSUE_NUM} ${ACTION}") in ${REPO_MD}${NL}"
 		MSG+="  ╰ <code>${TITLE}</code>${NL}"
 		MSG+="  ╰ ${ACTOR_MD}"
