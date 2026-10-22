@@ -24,8 +24,15 @@
 # the app's `patches-version` if it carries one, else the pool's top-level value; the
 # `both` routing word resolves to its own pool as build.sh does; a `stable`/`beta`
 # keyword is answered from state/patch_sources.json exactly as _patch_source_state_tag
-# answers it; anything else is already a concrete pin. No answer means no invented tag:
-# the keyword is then printed as written and left unlinked.
+# answers it; anything else is already a concrete pin.
+#
+# An app with nothing to build from is NOT queued and is not listed: a source the
+# snapshot marks blocked is skipped outright by the engine, and a channel with no tag
+# recorded for that source has no bundle to patch with (sync_patch_sources.py leaves the
+# field empty precisely because the forge publishes none). Both are logged so the run
+# still shows why an enabled app is missing from the message, but naming them as queued
+# would announce builds nobody starts - the same reason this step reads the effective
+# triggers instead of the raw ones.
 #
 # Env: TG_TOKEN TG_CHAT_ID TG_THREAD_NOTIFY EFFECTIVE_STABLE EFFECTIVE_BETA
 #      RVB_PATCH_SOURCES_JSON (snapshot path override, as the engine's helper has)
@@ -104,8 +111,8 @@ state_tag() {
 
 # state_blocked <owner/repo> <host> — success when the snapshot marks the repository
 # blocked (404/451/403 from the forge), the same read as _patch_source_state_blocked.
-# The engine skips those apps outright, so the notice has to say so rather than call
-# them quietly queued.
+# The engine skips those apps before it even resolves a version, so a blocked source
+# contributes no queue entry here.
 state_blocked() {
 	local file="${RVB_PATCH_SOURCES_JSON:-state/patch_sources.json}"
 	if [ ! -f "$file" ]; then
@@ -120,11 +127,13 @@ state_blocked() {
 	' "$file" >/dev/null 2>&1
 }
 
-# arch_list <config-file> <app-key> — the effective arch set as `arm-v7a, arm64-v8a`.
-# retry_effective_arch is the shared normaliser, so an absent arch prints the "both"
-# fan-out instead of the raw keyword: routing keywords are expanded, never shown.
+# arch_list <raw-arch-value> — the arch set as `arm-v7a, arm64-v8a`. retry_normalize_arch
+# is the shared normaliser the watcher and the build both use (retry_effective_arch is
+# just this plus the config read, and the pool record already carries the value), so an
+# absent arch prints the "both" fan-out instead of the raw keyword: routing keywords are
+# expanded here, never shown.
 arch_list() {
-	retry_effective_arch "$1" "$2" |
+	retry_normalize_arch "${1:-}" |
 		tr -s '[:space:]' '\n' | LC_ALL=C sort -u | sed '/^$/d' | paste -sd ',' - | sed 's/,/, /g'
 }
 
@@ -195,17 +204,19 @@ if [ -z "${records//[[:space:]]/}" ]; then
 	exit 0
 fi
 
-tg_require_targets \
-	"TG_CHAT_ID=${TG_CHAT_ID:-}" \
-	"TG_THREAD_NOTIFY=${TG_THREAD_NOTIFY:-}" || exit 1
-
 # ---- Group by (patch source, resolved release tag) ----
-declare -A GROUP_ID GROUP_LABEL GROUP_URL GROUP_BLOCKED GROUP_COUNT GROUP_KEYS
+declare -A GROUP_ID GROUP_LABEL GROUP_URL GROUP_COUNT GROUP_KEYS
 declare -A APP_SEEN APP_CH APP_HEAD_TXT APP_ARCH
 ngrp=0
 
 while IFS=$'\x1f' read -r ch key name brand variant subvariant pkg src host ver archraw; do
 	if [ -z "$key" ]; then
+		continue
+	fi
+	# Blocked first, exactly as the engine orders it: a pinned tag of a dead repository
+	# is just as undownloadable as a keyword.
+	if state_blocked "$src" "$host"; then
+		echo "Queue: not listing $key ($ch) - patch source $src is blocked in the watcher state."
 		continue
 	fi
 	if [ -z "$ver" ]; then
@@ -218,40 +229,30 @@ while IFS=$'\x1f' read -r ch key name brand variant subvariant pkg src host ver 
 	if [ "${ver,,}" = "both" ]; then
 		ver=$ch
 	fi
-	tag=""
-	# Blocked is checked whatever the version value is, exactly as the engine does: a
-	# pinned tag of a dead repository is just as undownloadable as a keyword.
-	blocked=0
-	if state_blocked "$src" "$host"; then
-		blocked=1
-	fi
 	case "${ver,,}" in
 	stable | beta)
 		tag=$(state_tag "$src" "$host" "${ver,,}")
+		if [ -z "$tag" ]; then
+			echo "Queue: not listing $key ($ch) - no ${ver,,} release recorded for $src."
+			continue
+		fi
 		;;
 	*)
 		tag=$ver # already a concrete pin — the config named this release
 		;;
 	esac
-	# The label always names a version: the concrete tag when there is one, otherwise
-	# the value as written (a keyword nobody has answered yet). An unanswered keyword is
-	# never dressed up as a tag.
-	label="${src}/${tag:-$ver}"
-	url=""
-	if [ -n "$tag" ]; then
-		url=$(release_web_url "$host" "$src" "$tag")
-	fi
+	label="${src}/${tag}"
+	url=$(release_web_url "$host" "$src" "$tag")
 
 	# Two apps of the same source and host but different channels can land in
-	# different groups (different tags); the lookup key is the rendered pair, plus the
-	# blocked flag, so a blocked source never shares a header with a live one.
-	glookup="${label}|${url}|${blocked}"
+	# different groups (different tags); the lookup key is the rendered pair, so a
+	# repository name reused across forges never merges two unrelated bundles.
+	glookup="${label}|${url}"
 	if [ -z "${GROUP_ID[$glookup]:-}" ]; then
 		ngrp=$((ngrp + 1))
 		GROUP_ID[$glookup]=$ngrp
 		GROUP_LABEL[$ngrp]=$label
 		GROUP_URL[$ngrp]=$url
-		GROUP_BLOCKED[$ngrp]=$blocked
 		GROUP_COUNT[$ngrp]=0
 		GROUP_KEYS[$ngrp]=""
 	fi
@@ -265,7 +266,7 @@ while IFS=$'\x1f' read -r ch key name brand variant subvariant pkg src host ver 
 		if [ -n "$pkg" ]; then
 			APP_HEAD_TXT[$akey]+="${NL}  ╰ Package: \`${pkg}\`"
 		fi
-		APP_ARCH[$akey]=$(arch_list "configs/${ch}_build.json" "$key")
+		APP_ARCH[$akey]=$(arch_list "$archraw")
 		GROUP_COUNT[$gid]=$((GROUP_COUNT[$gid] + 1))
 		GROUP_KEYS[$gid]+="${key}${NL}"
 	else
@@ -276,6 +277,19 @@ while IFS=$'\x1f' read -r ch key name brand variant subvariant pkg src host ver 
 		esac
 	fi
 done <<<"$records"
+
+# Every enabled app may have been filtered out above; a queue with nothing buildable in
+# it sends nothing, and the per-app lines in the log say why (target guard after this
+# exit, per notify_targets.sh: a run with no queue must not fail over config it did not
+# need).
+if [ "$ngrp" = 0 ]; then
+	echo "Every queued app is blocked or has no release for its channel; no build-queue notification."
+	exit 0
+fi
+
+tg_require_targets \
+	"TG_CHAT_ID=${TG_CHAT_ID:-}" \
+	"TG_THREAD_NOTIFY=${TG_THREAD_NOTIFY:-}" || exit 1
 
 # ---- Assemble the message: group header, then its app blocks sorted by key ----
 CHUNK=""
@@ -328,7 +342,7 @@ put "$TITLE"
 # differently from another still gets a stable, readable order.
 ordered_gids=$(
 	for ((gid = 1; gid <= ngrp; gid++)); do
-		printf '%s\t%s\n' "$(printf '%s' "${GROUP_LABEL[$gid]}" | tr 'A-Z' 'a-z')" "$gid"
+		printf '%s\t%s\n' "$(printf '%s' "${GROUP_LABEL[$gid]}" | tr '[:upper:]' '[:lower:]')" "$gid"
 	done | LC_ALL=C sort | cut -f2-
 )
 
@@ -337,14 +351,7 @@ declare -a GROUP_BLOCKS
 for gid in $ordered_gids; do
 	n=${GROUP_COUNT[$gid]}
 	plural=$([ "$n" = 1 ] && printf 'app' || printf 'apps')
-	if [ -n "${GROUP_URL[$gid]}" ]; then
-		header="🧩 [$(md_clean "${GROUP_LABEL[$gid]}")](${GROUP_URL[$gid]}) · ${n} ${plural}"
-	else
-		header="🧩 $(md_clean "${GROUP_LABEL[$gid]}") · ${n} ${plural}"
-	fi
-	if [ "${GROUP_BLOCKED[$gid]}" = 1 ]; then
-		header+="${NL}  ╰ 🚫 Repository access blocked."
-	fi
+	header="🧩 [$(md_clean "${GROUP_LABEL[$gid]}")](${GROUP_URL[$gid]}) · ${n} ${plural}"
 
 	GROUP_BLOCKS=()
 	while IFS= read -r key; do
