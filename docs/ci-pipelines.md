@@ -309,10 +309,15 @@ only one in the message — and a blank line only between two events of a batch.
 Markdown was abandoned here for two reasons — it cannot nest a link inside a bold run, so
 a headline had to be either bold or clickable; and it has no escaping, so the old `md()`
 helper *deleted* `* _ [ ] \`` from every title, mangling a PR named "Fix [rename] (v2)".
-HTML needs only `& < >` escaped, so titles and branch names arrive whole. `queue.jsonl`
-needs no schema change: its `text` field has always meant "whatever `notify_render.sh`
-emitted", and the queue is empty between a burst and its drain (seconds), so no
-Markdown-rendered record can outlive the switch.
+HTML needs only `& < >` escaped, so titles and branch names arrive whole. The event title
+is additionally wrapped in `<code>`: it is the one string nobody controls, and `*`, `_`,
+`[` and a backtick each mean something to one renderer or the other, so a PR called
+"Fix *this* [that]" would otherwise arrive italicised with its brackets eaten. On the
+Discord side a title holding a backtick is fenced with `` \`\` `` rather than a single
+backtick, which is what lets it be shown literally. `queue.jsonl` needs no schema change:
+its `text` field has always meant "whatever `notify_render.sh` emitted", and the queue is
+empty between a burst and its drain (seconds), so no Markdown-rendered record can outlive
+the switch.
 
 - **`workflow_call` — immediate.** A caller (`ci.yml`/`manual-ci.yml`) invokes it on
   `failure()`; the `notify` job renders the generic "🔴 CI #N failed" alert via

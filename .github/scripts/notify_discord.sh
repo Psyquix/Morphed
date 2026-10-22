@@ -148,6 +148,13 @@ discord_from_tg_md() {
 # <code>/`, and <a href> to a markdown link. Captures stop at '<' because that producer
 # escapes every literal '<' to &lt;, so a tag's own text can never contain one.
 #
+# <code> gets two rules because an event title is a code span and a title may itself
+# contain a backtick ("Fix `foo`"): a single-` fence would end early and leak the rest of
+# the title as markup, so anything holding a backtick is fenced with `` and padded with
+# spaces, which Discord reads as literal. A title carrying two consecutive backticks
+# would need ``` — vanishingly rare, and it degrades to visible marks, not to broken
+# layout.
+#
 # ORDER IS THE WHOLE POINT: innermost constructs are unwrapped first, because a
 # release-note bundle heading is <b> around a link —
 # <b>🧩 owner/repo (<a href="…">v1.57.0</a>)</b> — while an event headline is a link
@@ -158,6 +165,7 @@ discord_from_tg_md() {
 # Same LC_ALL=C reason as discord_from_tg_md.
 discord_from_tg_html() {
 	LC_ALL=C sed \
+		-e 's|<code>\([^<]*`[^<]*\)</code>|`` \1 ``|g' \
 		-e 's|<code>\([^<]*\)</code>|`\1`|g' \
 		-e 's|<a href="\([^"]*\)">\([^<]*\)</a>|[\2](\1)|g' \
 		-e 's|<b>\([^<]*\)</b>|**\1**|g' \

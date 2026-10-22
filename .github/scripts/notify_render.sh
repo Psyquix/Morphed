@@ -20,6 +20,12 @@
 # marker in front of a title under a headline that says "Issue" repeats itself. A blank
 # line separates two events, which is the only place one belongs.
 #
+# The event title is sent as a code span. It is the one piece of text in these messages
+# that nobody controls, and `*`, `_`, `[` and a backtick all mean something to at least
+# one of the two renderers — a PR called "Fix *this* [that]" would otherwise arrive
+# italicised, with its brackets eaten, or with its emphasis marks missing. Monospace is
+# the one place a title is shown as written.
+#
 # Reads env describing the event and echoes the composed body. The caller supplies
 # everything except what is optional per branch.
 #
@@ -61,7 +67,7 @@ render_message() {
 			CSTR="commits"
 		fi
 		MSG="$(hlink "${PR_URL}" "${ICON} Pull request #${PR_NUM} ${ACTION}") in ${REPO_MD}${NL}"
-		MSG+="  ╰ ${TITLE}${NL}"
+		MSG+="  ╰ <code>${TITLE}</code>${NL}"
 		MSG+="  ╰ ${ACTOR_MD} · <code>$(h "${PR_HEAD_REF}")</code> → <code>$(h "${PR_BASE_REF}")</code> · ${PR_COMMITS} ${CSTR} · ${PR_FILES} files · +${PR_ADD}/-${PR_DEL}"
 
 	else
@@ -72,7 +78,7 @@ render_message() {
 		*) ICON="🐛" ;;
 		esac
 		MSG="$(hlink "${ISSUE_URL}" "${ICON} Issue #${ISSUE_NUM} ${ACTION}") in ${REPO_MD}${NL}"
-		MSG+="  ╰ ${TITLE}${NL}"
+		MSG+="  ╰ <code>${TITLE}</code>${NL}"
 		MSG+="  ╰ ${ACTOR_MD}"
 	fi
 
