@@ -1,7 +1,7 @@
 {
   "stable": {
     "reddit-morphe-v2026.24.0-arm64-v8a": {
-      "hash": "95fc0d90314664eb2927c235c2fdaf30",
+      "hash": "07aa86d812aa00529061ef794c2383dc",
       "kinds": [
         "apk"
       ]
@@ -19,13 +19,13 @@
       ]
     },
     "reddit-morphe-experimental-v2026.42.0-arm64-v8a": {
-      "hash": "b2cb4a07dbcb342d91f135920a34b91a",
+      "hash": "f28481f2fc718d24d38093310d0fb5dd",
       "kinds": [
         "apk"
       ]
     },
     "youtube-morphe-experimental-v21.42.241-arm64-v8a": {
-      "hash": "dadf7cc5241b4127f873720c467d3a87",
+      "hash": "bab529599593c7c33b08a33ebadf2588",
       "kinds": [
         "apk"
       ]
