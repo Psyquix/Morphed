@@ -356,7 +356,10 @@ Two rules that are easy to get wrong and are enforced in the library, not at the
   [Where a message ends](#where-a-message-ends-notify_packsh) for why the mirror and the
   Telegram send break at the same places. The dialect shift (`*x*` → `**x**`,
   `<b>` → `**`, `&amp;` → `&`) runs under `LC_ALL=C` for the same byte-vs-character
-  reason: under a UTF-8 locale `sed` mis-matches the emoji that leads every header.
+  reason: under a UTF-8 locale `sed` mis-matches the emoji that leads every header. The
+  HTML unwrapping also has to run **inside-out** — a bundle heading is `<b>` around an
+  `<a href>`, so the link must become `[v1.57.0](url)` before the `<b>` rule (which
+  cannot cross a `<`) will match the heading at all.
 - **A copy must not break a resend contract.** `notify_drain.sh` is the one site that
   treats a mirror failure as best-effort (`|| true`): a non-zero there would skip the
   prune, the queue would keep its lines, and the next drain would re-post the whole batch

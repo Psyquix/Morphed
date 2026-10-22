@@ -90,16 +90,22 @@ discord_from_tg_md() {
 
 # discord_from_tg_html — Telegram HTML to Discord Markdown, the inverse of the sed
 # that builds the release-notes body in build_notify_telegram.sh: <b>/**, <i>/_,
-# <code>/`, and <a href> to a markdown link. Captures stop at '<' because that
-# producer escapes every literal '<' to &lt;, so a tag's content can never contain
-# one. Entities are decoded last so decoded text cannot re-enter the tag pass.
+# <code>/`, and <a href> to a markdown link. Captures stop at '<' because that producer
+# escapes every literal '<' to &lt;, so a tag's own text can never contain one.
+#
+# ORDER IS THE WHOLE POINT: innermost constructs are unwrapped first, because a
+# release-note bundle heading is <b> around a link —
+# <b>🧩 owner/repo (<a href="…">v1.57.0</a>)</b> — and a rule that cannot cross a '<'
+# matches nothing until the <a> inside it has already become [text](url). Unwinding
+# outside-in left every bundle heading in the channel as literal <b>…</b> text.
+# Entities are decoded last so decoded text cannot re-enter the tag pass.
 # Same LC_ALL=C reason as discord_from_tg_md.
 discord_from_tg_html() {
 	LC_ALL=C sed \
+		-e 's|<a href="\([^"]*\)">\([^<]*\)</a>|[\2](\1)|g' \
+		-e 's|<code>\([^<]*\)</code>|`\1`|g' \
 		-e 's|<b>\([^<]*\)</b>|**\1**|g' \
 		-e 's|<i>\([^<]*\)</i>|_\1_|g' \
-		-e 's|<code>\([^<]*\)</code>|`\1`|g' \
-		-e 's|<a href="\([^"]*\)">\([^<]*\)</a>|[\2](\1)|g' \
 		-e 's|&lt;|<|g; s|&gt;|>|g; s|&quot;|"|g; s|&amp;|\&|g'
 }
 
