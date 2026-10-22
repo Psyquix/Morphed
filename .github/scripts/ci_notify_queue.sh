@@ -153,7 +153,7 @@ app_head() {
 			label="${label:+${label} • }${part}"
 		fi
 	done
-	out="📱 $(md_clean "$name")"
+	out="📱 *$(md_clean "$name")*"
 	if [ -n "$label" ]; then
 		out+=" ($(md_clean "$label"))"
 	fi
@@ -209,6 +209,10 @@ fi
 
 # ---- Group by (patch source, resolved release tag) ----
 declare -A GROUP_ID GROUP_LABEL GROUP_URL GROUP_COUNT GROUP_KEYS
+# The two parts of the label, kept for rendering: the heading shows them as
+# "owner/repo (v1.57.0)" with only the tag linked, the same grammar the release notes
+# use, while GROUP_LABEL stays the identity the group is keyed and ordered by.
+declare -A GROUP_SRC GROUP_TAG
 declare -A APP_SEEN APP_CH APP_HEAD_TXT APP_ARCH
 ngrp=0
 
@@ -255,6 +259,8 @@ while IFS=$'\x1f' read -r ch key name brand variant subvariant pkg src host ver 
 		ngrp=$((ngrp + 1))
 		GROUP_ID[$glookup]=$ngrp
 		GROUP_LABEL[$ngrp]=$label
+		GROUP_SRC[$ngrp]=$src
+		GROUP_TAG[$ngrp]=$tag
 		GROUP_URL[$ngrp]=$url
 		GROUP_COUNT[$ngrp]=0
 		GROUP_KEYS[$ngrp]=""
@@ -363,7 +369,12 @@ declare -a GROUP_BLOCKS
 for gid in $ordered_gids; do
 	n=${GROUP_COUNT[$gid]}
 	plural=$([ "$n" = 1 ] && printf 'app' || printf 'apps')
-	header="🧩 [$(md_clean "${GROUP_LABEL[$gid]}")](${GROUP_URL[$gid]}) · ${n} ${plural}"
+	# "owner/repo (v1.57.0)" rather than "owner/repo/v1.57.0": the tag is a version, not
+	# another path segment of the repository, and the heading is bold like the release
+	# notes'. The bold and the parentheses stop outside the link on purpose — Telegram's
+	# legacy Markdown renders *text [a](url) text* literally (see notify_render.sh) and
+	# both dialects end a [label](url) run at the first ')'.
+	header="🧩 *$(md_clean "${GROUP_SRC[$gid]}")* ([$(md_clean "${GROUP_TAG[$gid]}")](${GROUP_URL[$gid]})) · ${n} ${plural}"
 
 	GROUP_BLOCKS=()
 	while IFS= read -r key; do

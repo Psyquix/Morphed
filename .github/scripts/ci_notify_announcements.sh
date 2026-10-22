@@ -131,7 +131,7 @@ app_head() {
 			label="${label:+${label} • }${part}"
 		fi
 	done
-	out="📱 $(md_clean "$name")"
+	out="📱 *$(md_clean "$name")*"
 	if [ -n "$label" ]; then
 		out+=" ($(md_clean "$label"))"
 	fi

@@ -215,7 +215,7 @@ search_links() { # $1=pkg $2=base $3=ver(label, maybe 'vX')
 # Patches line naming the failing bundle.
 render_app_group() { # $1=base $2=blob $3=mode
 	local base=$1 blob=$2 mode=$3 out arch ver vc log patches pkg patch_url tok links
-	out="📱 $(md_clean "$base")"
+	out="📱 *$(md_clean "$base")*"
 	if [ "$mode" = build ]; then
 		patches=$(uniq_col 5 "$blob" | head -1)
 		[ -n "$patches" ] && out+="${NL}  ╰ Patches: [$(md_clean "$patches")](https://github.com/$patches)"
@@ -231,8 +231,11 @@ render_app_group() { # $1=base $2=blob $3=mode
 			# No log, no APK to hunt for: the bundle is the thing that has to change.
 			[ -z "$patches" ] && { out+="${NL}  ╰ ${arch}${tok:+ ${tok}}"; continue; }
 			if [ -n "$patch_url" ]; then
-				# Deep-link the exact release that refused, labelled with its tag.
-				links="[$(md_clean "$patches/${patch_url##*/}")](${patch_url})"
+				# Deep-link the exact release that refused, labelled "owner/repo (tag)" —
+				# the tag is a version, not a path segment, and the parentheses stay outside
+				# the link because a ')' inside a [label] run ends it (same grammar as the
+				# release notes and the build-queue headings).
+				links="$(md_clean "$patches") ([$(md_clean "${patch_url##*/}")](${patch_url}))"
 			else
 				links="[Patch bundle](https://github.com/$patches)"
 			fi

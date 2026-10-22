@@ -60,6 +60,17 @@ DC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=notify_pack.sh
 source "$DC_DIR/notify_pack.sh"
 
+# discord_hide_link_targets — wrap every [label](url) target in angle brackets, stdin to
+# stdout. flags:4 does not cover everything: a discord.gg invite is not a link embed but
+# a server-invitation component, and it survived SUPPRESS_EMBEDS in the release footer
+# while ordinary GitHub previews were suppressed. [label](<url>) is the documented text
+# form that stops the unfurl and keeps the label clickable, and every link the notifiers
+# emit is of that shape (no body writes a bare URL), so one pass here covers all sinks.
+# Already-wrapped targets are left alone, so this is safe to run twice.
+discord_hide_link_targets() {
+	LC_ALL=C sed -e 's|\](\([^<)][^)]*\))|](<\1>)|g'
+}
+
 # _pack_len_units <text> — set _PACK_LEN to the UTF-16 code-unit length of <text>, the
 # currency Discord charges against its 2000-message limit. ${#var} counts a leading emoji
 # as one character while the API counts it as two, so a char-budgeted message can be twice
@@ -179,6 +190,10 @@ discord_send() {
 	else
 		text=$(discord_from_tg_md <<<"$text")
 	fi
+	# Angle-bracket the link targets after conversion: the converters create [label](url)
+	# from <a href>, and the packer below counts the result, so the wrapping has to be
+	# priced into the message length rather than added afterwards.
+	text=$(discord_hide_link_targets <<<"$text")
 
 	# Same packer the Telegram sites use, so the mirror's boundaries match theirs:
 	# whole blocks only, and a heading travels with the block under it. The heading
