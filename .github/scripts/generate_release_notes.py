@@ -214,18 +214,23 @@ def main():
     lines.append("• Use [Zygisk Detach](https://github.com/j-hc/zygisk-detach) to stop Play Store from updating Modules.  ")
     lines.append("")
     gh_repo = os.environ.get("GITHUB_REPOSITORY") or "nullcpy/rvb"
-    donate_link = os.environ.get("RELEASE_NOTES_DONATE_LINK") or "https://fahim-ahmed05.github.io/donate"
-    website_link = os.environ.get("RELEASE_NOTES_WEBSITE_LINK") or "https://nullcpy.github.io"
-    # No built-in community handle: the fallback used to name one specific chat's
-    # username, so after a rename every release body kept advertising a dead link
-    # and nothing failed. An unset variable omits the entry instead of guessing.
+    # No built-in link values: a written-in fallback named one specific page or
+    # chat, so after a rename or a site move every release body kept advertising a
+    # dead link and nothing failed. Each entry now comes from its repo variable
+    # alone, and an unset one drops the entry instead of guessing a target.
     discord_link = os.environ.get("RELEASE_NOTES_DISCORD_LINK") or ""
-    if not discord_link:
-        print("Warning: RELEASE_NOTES_DISCORD_LINK is not set; omitting the Discord link from the release notes.")
+    donate_link = os.environ.get("RELEASE_NOTES_DONATE_LINK") or ""
+    website_link = os.environ.get("RELEASE_NOTES_WEBSITE_LINK") or ""
     footer = [f"🌐 [GitHub](https://github.com/{gh_repo})"]
-    if discord_link:
-        footer.append(f"💬 [Discord]({discord_link})")
-    footer += [f"☕ [Donate]({donate_link})", f"🔗 [Website]({website_link})"]
+    for label, value, var in (
+        (f"💬 [Discord]({discord_link})", discord_link, "RELEASE_NOTES_DISCORD_LINK"),
+        (f"☕ [Donate]({donate_link})", donate_link, "RELEASE_NOTES_DONATE_LINK"),
+        (f"🔗 [Website]({website_link})", website_link, "RELEASE_NOTES_WEBSITE_LINK"),
+    ):
+        if value:
+            footer.append(label)
+        else:
+            print(f"Warning: {var} is not set; omitting that link from the release notes.")
     lines.append(" | ".join(footer))
     lines.append("")
     content = "\n".join(lines)

@@ -27,8 +27,9 @@
 # new in both pools reads "stable, beta" - so the two fields use the same expanded
 # convention.
 #
-# Env: TG_TOKEN TG_CHAT_ID TG_THREAD_ANNOUNCE WEBSITE_LINK (chat + topic come from
-#      repo variables only, per notify_targets.sh; no hardcoded handle/topic).
+# Env: TG_TOKEN TG_CHAT_ID TG_THREAD_ANNOUNCE WEBSITE_LINK (chat, topic and the site
+#      link all come from repo variables only, per notify_targets.sh; no hardcoded
+#      handle/topic/site URL, and an unset WEBSITE_LINK only drops the download line).
 #      DISCORD_WEBHOOK_GITHUB_LOG (optional mirror, see notify_discord.sh)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,7 +64,7 @@ tg_require_targets \
 	"TG_THREAD_ANNOUNCE=${TG_THREAD_ANNOUNCE:-}" || exit 1
 
 NL=$'\n'
-WEB_LINK="${WEBSITE_LINK:-https://nullcpy.github.io/}"
+WEB_LINK="${WEBSITE_LINK:-}"
 
 # md_clean <text> — strip chars that would corrupt a [label](url) or *bold* run.
 md_clean() { printf '%s' "$1" | tr -d '[]`'; }
@@ -234,7 +235,15 @@ fi
 # this section exists to remove.
 mark="🪸"
 if [ "${new_count:-0}" -gt 0 ]; then mark="🆕"; fi
-MSG+="${NL}${NL}${mark} ${tail}.${NL}🔗 [Download from NullStore](${WEB_LINK})."
+MSG+="${NL}${NL}${mark} ${tail}."
+# The download line is only as trustworthy as the variable behind it: a written-in
+# site URL would go on advertising an old host after a move and nothing here would
+# notice, so an unset one is reported and the line is dropped instead.
+if [ -n "$WEB_LINK" ]; then
+	MSG+="${NL}🔗 [Download from NullStore](${WEB_LINK})."
+else
+	echo "WEBSITE_LINK is not set. Omitting the download link from the announcement."
+fi
 
 curl -s -X POST \
 	--data-urlencode "parse_mode=Markdown" \

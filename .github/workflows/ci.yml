@@ -164,7 +164,7 @@ jobs:
           TG_CHAT_ID: ${{ vars.TG_CHAT_ID }}
           TG_THREAD_ANNOUNCE: ${{ vars.TG_THREAD_ANNOUNCE }}
           DISCORD_WEBHOOK_GITHUB_LOG: ${{ secrets.DISCORD_WEBHOOK_GITHUB_LOG }}
-          WEBSITE_LINK: ${{ vars.RELEASE_NOTES_WEBSITE_LINK || 'https://nullcpy.github.io/' }}
+          WEBSITE_LINK: ${{ vars.RELEASE_NOTES_WEBSITE_LINK }}
         run: bash .github/scripts/ci_notify_announcements.sh
 
       - name: Commit updated patch sources and configs
