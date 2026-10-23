@@ -907,6 +907,30 @@ _req() {
 }
 req() { _req "$1" "$2" -H "User-Agent: ${DEFAULT_UA}"; }
 gh_req() { _req "$1" "$2" -H "$GH_HEADER"; }
+# A vendor's own download endpoint is the one place a transfer can die part-way and
+# stay dead: curl reports a truncated body as (18) "transfer closed with N bytes
+# remaining", which is NOT in curl's transient list, so --retry never covers it, and a
+# link that redirects to a freshly minted signed URL (telegram.org/dl/android/apk ->
+# cdn4.telesco.pe/file/Telegram.apk?token=...) cannot be resumed with -C - because the
+# token belongs to the request that died. Re-requesting the bare URL is what recovers:
+# the redirect is followed again and a new token is served. _req deletes its partial
+# file and releases the per-destination lock when it fails, so every attempt here is a
+# genuine fresh fetch and never a resume of a half file.
+# Observed in run 39985777497: one arch of Telegram (web) 13.1.0 received 277 KB of a
+# 70 MB APK and was dropped as a source miss, while its sibling's attempt twelve
+# seconds later completed the same URL.
+req_artifact() { # $1=url  $2=destination
+	local url=$1 out=$2 att=1 tries=3
+	while [ "$att" -le "$tries" ]; do
+		if req "$url" "$out"; then return 0; fi
+		if [ "$att" -lt "$tries" ]; then
+			wpr "Retrying '$url' (attempt $((att + 1))/$tries)"
+			sleep $((att * 5))
+		fi
+		att=$((att + 1))
+	done
+	return 1
+}
 source_release_req() {
 	local host=${1,,} url=$2 out=${3:--}
 	case "$host" in
@@ -4200,7 +4224,7 @@ get_direct_resp() { # $1=url
 	fi
 	local probe="${TEMP_DIR}/apks_dl/direct-$(_dlurl_sha "$url").apk"
 	mkdir -p "${TEMP_DIR}/apks_dl" 2>/dev/null || return 1
-	if ! req "$url" "$probe"; then
+	if ! req_artifact "$url" "$probe"; then
 		epr "ERROR: Could not download the direct URL '$url'"
 		rm -f "$probe"
 		return 1
@@ -4246,7 +4270,7 @@ dl_direct() {
 		pr "Adopting the already-fetched direct download for '$url' (no re-download)"
 		return 0
 	fi
-	req "$url" "$output" || return 1
+	req_artifact "$url" "$output" || return 1
 	_dlurl_index_record "$url" "$output"
 }
 # Reported only through get_direct_resp, which read them off the artifact; nothing here

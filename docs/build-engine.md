@@ -414,7 +414,10 @@ Supporting machinery:
   hard-wired at APKPure/APKCombo regardless of the chain.
 - **Transfer guards** — `_req` sets connect *and* absolute ceilings plus a low-
   speed stall guard, because a mirror that trickles would otherwise hold a build
-  slot forever.
+  slot forever. `req_artifact` wraps it for a vendor's own download endpoint: a CDN
+  that closes the socket mid-file fails with curl (18), which `--retry` does not treat
+  as transient and which `-C -` cannot resume through a per-request signed redirect, so
+  the URL is re-requested (up to three attempts) rather than dropped as a source miss.
 - **Locks** — two of them, and neither may assert a fact the bytes have not proved yet.
   `temp/dllocks` serialises a single destination path, so parallel jobs never fetch the
   same file twice. `temp/apkslocks` serialises the whole cache-check → download → upload

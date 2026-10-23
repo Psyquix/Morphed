@@ -9,9 +9,10 @@
 # control (an unset memo, a non-zip body, a mismatching package), because a predicate
 # that returns nothing for every input would otherwise pass them all.
 #
-# Stubs: `req` (serves a fixed local body instead of the network) and `_meta_field_of`
-# (reads the identity from a sidecar next to that body). `unzip`, `_artifact_abis` and
-# the learned download-link index stay real.
+# Stubs: `req` (serves a fixed local body instead of the network, and in case 10 a
+# transfer that dies twice before answering), `sleep` (so the retry backoff costs no
+# test time) and `_meta_field_of` (reads the identity from a sidecar next to that
+# body). `unzip`, `_artifact_abis` and the learned download-link index stay real.
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 # shellcheck disable=SC1091
@@ -153,5 +154,45 @@ dl_direct "https://host/cold.apk" 1.0 "$t/cold.apk" arm64-v8a 2>/dev/null || fai
 [ "$REQ_CALLS" = 1 ] || fail "cold fetch count: $REQ_CALLS"
 dl_direct "https://host/cold.apk" 1.0 "$t/warm.apk" x86 2>/dev/null || fail "warm dl_direct"
 [ "$REQ_CALLS" = 1 ] || fail "second arch re-fetched a recorded link ($REQ_CALLS)"
+
+# --- 10. a transfer that dies part-way is re-requested, never resumed ---------------
+# A vendor CDN that closes the socket mid-file makes curl fail with (18) "transfer
+# closed with N bytes remaining", which --retry does not treat as transient and which
+# -C - cannot resume through a per-request signed redirect. req_artifact must therefore
+# start a fresh request; run 39985777497 lost Telegram's 70 MB universal APK on the
+# first arch and its sibling's attempt twelve seconds later completed.
+# Negative control: every successful case above asserts REQ_CALLS = 1, so a stub that
+# always succeeds cannot be what makes these counts reach 3.
+sleep() { :; }                      # keep the backoff out of the test clock
+_gr_saved="${GITHUB_REPOSITORY:-}"  # the retry warning is expected, not an annotation
+GITHUB_REPOSITORY=""
+_req_orig=$(declare -f req)
+_n_flaky=0
+_n_limit=3                     # how many attempts die before the URL answers
+req() {                            # dies twice, then serves the body
+	REQ_CALLS=$((REQ_CALLS + 1))
+	_n_flaky=$((_n_flaky + 1))
+	if [ "$_n_flaky" -lt "$_n_limit" ]; then rm -f "$2" 2>/dev/null; return 1; fi
+	cp -f "$FAKE_BODY" "$2" || return 1
+}
+reset_direct
+serve body.apk
+set_meta com.example.app 1.0 100
+REQ_CALLS=0
+req_artifact "https://host/flaky" "$t/recovered.apk" >/dev/null 2>&1 ||
+	fail "a truncated transfer was not retried to success"
+[ "$REQ_CALLS" = 3 ] || fail "flaky URL: expected 3 attempts, saw $REQ_CALLS"
+[ -s "$t/recovered.apk" ] || fail "the successful attempt did not land the artifact"
+
+_n_limit=9999                      # now the URL never answers
+REQ_CALLS=0
+req_artifact "https://host/dead" "$t/dead.apk" >/dev/null 2>&1 &&
+	fail "a URL that never answered reported success"
+[ "$REQ_CALLS" = 3 ] || fail "dead URL: expected 3 attempts, saw $REQ_CALLS"
+[ ! -e "$t/dead.apk" ] || fail "a failed download left an artifact behind"
+
+eval "$_req_orig"                      # the harness stub, not the real _req
+GITHUB_REPOSITORY="$_gr_saved"
+unset -f sleep
 
 echo "direct source: all cases passed"
