@@ -5325,6 +5325,11 @@ build_rv() {
 	local final_stock_apk=""
 	local final_all_apk=""
 	local final_version=""
+	# The last version the engine actually resolved. build_rv wipes 'version' to
+	# final_version (empty when nothing built) right after this loop, so the failure
+	# descriptors below cannot read it; a latest/auto app also leaves resolved_version
+	# empty, which is why they used to report a blank version. This survives the loop.
+	local last_resolved_version=""
 	# Why the candidate loop produced nothing. The two outcomes are reported very
 	# differently: versions rejected by the patch set never wanted an APK, so telling a
 	# human to upload one is noise; a fetch no source served is exactly that request.
@@ -5468,6 +5473,10 @@ build_rv() {
 			epr "empty version, not building ${table}."
 			continue
 		fi
+		# Remember the concrete version this candidate resolved to (from config, patches
+		# or the live latest), so a later fetch/patch failure can still report it after
+		# 'version' is reset. Set before the patch gate so the no-patches path has it too.
+		last_resolved_version="$version"
 
 		if [ "$mode_arg" = module ]; then
 			build_mode_arr=(module)
@@ -5926,7 +5935,7 @@ build_rv() {
 			if [ -f "$stock_apk" ]; then break; fi
 		done
 		if [ ! -f "$stock_apk" ]; then
-			epr "ERROR: Could not download '${table}' for version $resolved_version"
+			epr "ERROR: Could not download '${table}' for version ${version:-$resolved_version}"
 			continue
 		fi
 
@@ -5952,7 +5961,7 @@ build_rv() {
 			epr "ERROR: No supported version of '${table}' has patches to apply from '${args[patches_src]:-${args[cli_source]:-}}' (tried: ${_tried_versions})."
 			write_no_patches_failure_descriptor "$(failure_slug "$table")" "$table" \
 				"$_tried_versions" \
-				"${resolved_version:-$version_mode}" "$(parse_arch_mapping "${args[version_code]:-}" "${arch_f:-}")" \
+				"${last_resolved_version:-${resolved_version:-$version_mode}}" "$(parse_arch_mapping "${args[version_code]:-}" "${arch_f:-}")" \
 				"${arch_f:-}" "${args[patches_src]:-${args[cli_source]:-}}" "$pkg_name" \
 				"${args[changelog_url]%% *}"
 			return 0
@@ -5966,8 +5975,13 @@ build_rv() {
 		# said "No failure records in temp/failures; nothing to report").
 		# write_dl_failure_descriptor uses its own <slug>_dl.json name, which that clearing does
 		# not touch, so the app now reaches the notify topic with the manual-upload hint.
+		# Report the version that was actually resolved, not just 'resolved_version': for
+		# a latest/auto app resolved_version stays empty even though the live source
+		# answered with a concrete number, and version_label then blanks the placeholder
+		# the notification would otherwise carry. 'version' has already been reset by the
+		# loop's cleanup, so read the captured last_resolved_version.
 		write_dl_failure_descriptor "$(failure_slug "$table")" "$table" \
-			"${resolved_version:-$version_mode}" \
+			"${last_resolved_version:-${resolved_version:-$version_mode}}" \
 			"$(parse_arch_mapping "${args[version_code]:-}" "${arch_f:-}")" \
 			"${arch_f:-}" "$pkg_name"
 		return 0
