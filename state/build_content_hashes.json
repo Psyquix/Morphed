@@ -61,6 +61,42 @@
       "kinds": [
         "apk"
       ]
+    },
+    "youtube-music-morphe-v9.20.53-arm64-v8a": {
+      "hash": "50bd74c166e41c11f3315a5ebbc6eda9",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "youtube-music-morphe-experimental-v9.42.52-arm64-v8a": {
+      "hash": "6e11a8272928de06b0f8dc71ad333bf6",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "reddit-morphe-v2026.24.0-arm64-v8a": {
+      "hash": "254992332068aa20f1e4c1c4188f5ea8",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "reddit-morphe-experimental-v2026.42.0-arm64-v8a": {
+      "hash": "5f83d6f33156f2bc6d237abac4b4202f",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "youtube-morphe-experimental-v21.42.241-arm64-v8a": {
+      "hash": "a710f3eeeeb713a5b64c6589add8025a",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "youtube-morphe-v21.23.492-arm64-v8a": {
+      "hash": "8ed47f4591251fd5d93332a22b5f6bf2",
+      "kinds": [
+        "apk"
+      ]
     }
   }
 }
