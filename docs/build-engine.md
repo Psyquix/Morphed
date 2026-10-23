@@ -259,8 +259,11 @@ for adding surface without a measured gain
    APKPure/APKCombo/Uptodown links carry no ABI in the URL, so the first build to want
    one fetches it **once** and records its bytes in `temp/urlindex`; a later job that
    resolves the same link adopts the stored blob (right arch) or skips the source
-   (wrong arch) with no network hit. Universal bundles are cached under the shared
-   `-all` key and reused by both arch jobs from that single fetch.
+   (wrong arch) with no network hit. What a build finally stores is keyed the same way:
+   `_publish_stock_artifact` reads the arch token off the artifact — bundle or plain APK
+   alike — so a universal file takes the shared `-all` key that both arch jobs then reuse
+   from that single fetch, and an arch-specific file can never be adopted by somebody
+   else's build.
 5. **Arch trimming** — one keep-list decides both halves (`_striplibs_keep_of_arch`).
    Bundles go through `_trim_bundle_for_arch`, which drops whole foreign-ABI `config.*`
    members; a plain APK goes through `_strip_apk_abis`, which reads the archive's own
@@ -412,9 +415,15 @@ Supporting machinery:
 - **Transfer guards** — `_req` sets connect *and* absolute ceilings plus a low-
   speed stall guard, because a mirror that trickles would otherwise hold a build
   slot forever.
-- **Locks** — per-package download locks under `temp/dllocks` stop parallel jobs
-  fetching the same APK twice; rejected downloads sweep their sibling bundle
-  files so the post-loop scan cannot adopt a partial artifact.
+- **Locks** — two of them, and neither may assert a fact the bytes have not proved yet.
+  `temp/dllocks` serialises a single destination path, so parallel jobs never fetch the
+  same file twice. `temp/apkslocks` serialises the whole cache-check → download → upload
+  sequence per **pkg + version**: deliberately not per version code, because the code is
+  read off the artifact after the lock is taken (an arch no supported version declares
+  starts without one, and `direct` re-keys afterwards), so codes-in-the-lock-name let two
+  sibling arch builds run unserialized and store one universal APK twice. Rejected
+  downloads sweep their sibling bundle files so the post-loop scan cannot adopt a
+  partial artifact.
 - **Response caches** — `__DL_RESP_CACHE__` and friends keep a run from
   re-scraping the same page per architecture.
 

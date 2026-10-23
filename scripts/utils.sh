@@ -4979,6 +4979,70 @@ _artifact_satisfies_arch() { # $1=apk or bundle  $2=arch
 	_abis_satisfies "$abis" "${2:-}"
 }
 
+# Publish a freshly fetched stock artifact into the cache directory under the arch
+# token its OWN bytes justify, and hand that path back to the build.
+#
+# Staging keeps the requested arch to the end - every rejection path in build_rv
+# sweeps "${stock_apk%.apk}.*" and the passthrough sidecar scan predicts those names -
+# but a name inside apk_cache_dir, and so in the apks store, states what the file
+# contains. That key has always been read off the bytes for a bundle
+# (_cache_arch_key); a plain APK used to inherit the arch the build happened to ask
+# for, which is how one vendor universal APK came to sit in the store as
+# <pkg>-13.1.0-72299-arm-v7a.apk beside the identical <pkg>-13.1.0-72299-all.apk.
+# Universal bytes belong under the shared "-all" key that _cache_probe_apk and
+# dl_archive already offer to every architecture (docs/cache-repo.md), and an
+# arch-named copy of them is a filename that lies plus a second 70 MB object nobody
+# asks for.
+#
+# The write is a temp file plus one rename, so an interrupted build cannot leave a
+# half file for the next check to trust. A destination that already holds a readable
+# archive is adopted instead of rewritten: the per-pkg+version lock in build_rv means
+# whoever wrote it is finished with it and already uploaded it, so _PUB_UPLOADED stays
+# empty and the caller owes the store nothing. A destination that is not a zip is a
+# partial from a killed run and is overwritten.
+#
+# Sets _PUB_APK (the path to build from), _PUB_ALL (the same path when it is the
+# shared key, else empty - the caller spares that one from the validation delete) and
+# _PUB_UPLOADED (1 when the caller owes the store an upload).
+_publish_stock_artifact() { # $1=staged artifact  $2=cache dir  $3=pkg  $4=version_f  $5=vc_infix  $6=arch_f
+	local staged=$1 cdir=$2 pkg=$3 ver=$4 vci=$5 arch_f=$6
+	local ext="" key dst tmp
+	_PUB_APK=""
+	_PUB_ALL=""
+	_PUB_UPLOADED=""
+	[ -f "$staged" ] || return 1
+	# A bundle keeps its own container extension; anything else is a plain APK.
+	if ! ext=$(_bundle_ext_of "$staged"); then ext="apk"; fi
+	key=$(_cache_arch_key "$staged" "$arch_f")
+	dst="${cdir}/${pkg}-${ver}${vci}-${key}.${ext}"
+	if [ "$key" != "$arch_f" ] && [ "$key" != all ]; then
+		wpr "The artifact fetched for '$pkg' carries '$key' but '$arch_f' was requested; caching under its own key"
+	fi
+	if [ "$key" = all ]; then _PUB_ALL="$dst"; fi
+	if [ "$staged" = "$dst" ]; then
+		_PUB_APK="$staged"
+		_PUB_UPLOADED=1
+		return 0
+	fi
+	if [ -f "$dst" ] && unzip -l "$dst" >/dev/null 2>&1; then
+		pr "Adopting the already published '${dst##*/}' (no rewrite, no second upload)"
+		_PUB_APK="$dst"
+		return 0
+	fi
+	tmp="${dst}.tmp.$$"
+	if ! cp -f "$staged" "$tmp"; then
+		rm -f "$tmp"
+		return 1
+	fi
+	if ! mv -f "$tmp" "$dst"; then
+		rm -f "$tmp"
+		return 1
+	fi
+	_PUB_APK="$dst"
+	_PUB_UPLOADED=1
+	return 0
+}
+
 # -------------------- learned download-link index --------------------
 # An APKPure/APKCombo/Uptodown link carries no ABI in its URL, so the only way to
 # know what it serves is to fetch it. The first build to want one fetches it once and
@@ -5558,10 +5622,18 @@ build_rv() {
 			# cache repo instead of hammering the same source twice, and can never
 			# race on creating/uploading to the same apks-cache-repo release.
 			# Lock files live OUTSIDE apk_cache_dir so they never enter its cache manifest.
+			#
+			# The version code is deliberately NOT part of the lock name. It is a claim about
+			# bytes that are only read after the lock is taken - the arch picker leaves it
+			# unset when no supported version declares this arch, and the direct source
+			# re-keys to the code it reads off the artifact - so two builds of one pkg+version
+			# can compute different names here and run unserialized. That is what let one
+			# universal Telegram APK be uploaded twice in run 39985777497 (arm64-v8a locked on
+			# the declared code, arm-v7a on the name without it).
 			local _apk_lock_held=""
 			if command -v flock >/dev/null 2>&1; then
 				mkdir -p "${TEMP_DIR}/apkslocks"
-				exec 203>"${TEMP_DIR}/apkslocks/${pkg_name}-${version_f}${vc_infix}.lock"
+				exec 203>"${TEMP_DIR}/apkslocks/${pkg_name}-${version_f}.lock"
 				flock -x 203
 				_apk_lock_held=1
 			fi
@@ -5874,43 +5946,25 @@ build_rv() {
 						all_apk=""
 					fi
 				fi
-				if [ -f "$stock_apk" ] && [ -z "$morphe_bundle_path" ] && [ ! -f "$all_apk" ] && [[ "$arch" != "all" && "$arch" != "universal" ]]; then
-					if check_is_universal "$stock_apk"; then
-						mv -f "$stock_apk" "$all_apk"
-						if [ -f "${stock_apk%.apk}.apkm" ]; then
-							mv -f "${stock_apk%.apk}.apkm" "${all_apk%.apk}.apkm"
-						fi
-						stock_apk="$all_apk"
-					fi
-				fi
-				
-				# Sync pristine files from staging to cache
+				# Publish the pristine file from staging into the cache dir under the arch
+				# token its own bytes justify, atomically, adopting a sibling's identical copy
+				# instead of writing a second one (_publish_stock_artifact). The build continues
+				# from the cache path; all_apk is that same path only when it is the shared
+				# "-all" key. If publishing fails (a full or unwritable cache dir) the staged
+				# copy is still buildable, so the app is not dropped over the cache.
+				local _PUB_APK="" _PUB_ALL="" _PUB_UPLOADED=""
 				if [ -f "$stock_apk" ]; then
-					local _sync_bext
-					if _sync_bext=$(_bundle_ext_of "$stock_apk"); then
-						# Key the bundle by what it contains. Naming every bundle "-all" is what
-						# let one arch's artifact be adopted by another.
-						local _bkey cached_bundle
-						_bkey=$(_cache_arch_key "$stock_apk" "$arch_f")
-						cached_bundle="${apk_cache_dir}/${pkg_name}-${version_f}${vc_infix}-${_bkey}.${_sync_bext}"
-						if [ "$_bkey" != all ] && [ "$_bkey" != "$arch_f" ]; then
-							wpr "Bundle fetched for '$table' carries '$_bkey' but '$arch' was requested; caching under its own key"
-						fi
-						cp -f "$stock_apk" "$cached_bundle"
-						stock_apk="$cached_bundle"
-						all_apk="$cached_bundle"
-					elif [ "$stock_apk" = "$all_apk" ]; then
-						cp -f "$all_apk" "$cached_all_apk"
-						stock_apk="$cached_all_apk"
-						all_apk="$cached_all_apk"
+					if _publish_stock_artifact "$stock_apk" "$apk_cache_dir" "$pkg_name" \
+						"$version_f" "$vc_infix" "$arch_f"; then
+						stock_apk="$_PUB_APK"
+						all_apk="$_PUB_ALL"
 					else
-						cp -f "$stock_apk" "$cached_stock_apk"
-						stock_apk="$cached_stock_apk"
+						wpr "Could not publish the downloaded artifact for '$table' into ${apk_cache_dir}; building from the staged copy"
 						all_apk=""
 					fi
 				fi
 
-				if [ -f "$stock_apk" ] && [ -n "${UPLOAD_APKS_REPO:-}" ] && [ "$dl_p" != "archive" ] && [ "$dl_p" != "cache_repo" ]; then
+				if [ -f "$stock_apk" ] && [ -n "$_PUB_UPLOADED" ] && [ -n "${UPLOAD_APKS_REPO:-}" ] && [ "$dl_p" != "archive" ] && [ "$dl_p" != "cache_repo" ]; then
 					pr "Uploading newly downloaded APKs to ${UPLOAD_APKS_REPO}..."
 					local _ua_file="$stock_apk" _ua_ok="" _ua_att
 					[ -n "$all_apk" ] && [ -f "$all_apk" ] && _ua_file="$all_apk"

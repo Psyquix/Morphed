@@ -66,8 +66,19 @@ Reading is deliberately narrow:
   supported) which **nothing currently populates** — an extension point, not a live
   feature. Treat it as unwired until a config key exists for it.
 
-A single-ABI artifact is only ever stored and served under its own ABI key — never
-promoted to the shared `-all` name, which only a verified universal bundle may use.
+The key an artifact is stored under is read off its bytes, never off the arch the build
+happened to ask for: `_publish_stock_artifact` runs `_cache_arch_key` over the fetched
+file — bundle or plain APK alike — so a universal artifact (both arm ABIs, or no ABI
+content at all) takes the shared `-all` name every architecture may adopt, and a
+single-ABI artifact takes its own ABI name and can never be mistaken for somebody
+else's. The write is a temp file plus one rename under the per-pkg+version lock, and a
+destination that already holds a readable archive is adopted rather than rewritten (and
+not uploaded a second time). That lock deliberately keeps the version code out of its
+name, because the code is only proved by the bytes: when it stayed in the name, the two
+arch builds of Telegram (web) 13.1.0 resolved different codes, ran unserialized, and
+left one vendor universal APK in the store twice — as `<pkg>-13.1.0-72299-all.apk` and
+again as `<pkg>-13.1.0-72299-arm-v7a.apk`.
+
 A companion on-disk **download-link index** (`temp/urlindex`, per-run, outside
 `apk_cache_dir`) records what an arch-blind store link (APKPure/APKCombo/Uptodown)
 actually contains after the first fetch, so a sibling architecture neither
@@ -76,9 +87,10 @@ re-downloads it nor adopts it under the wrong name
 
 ## How rvb writes it
 
-After a *fresh* download succeeds (never one that came from the cache itself, and
-never one from `archive` — otherwise archive.org copies would be laundered into the
-cache as if they were store originals):
+After a *fresh* download succeeds (never one that came from the cache itself, never one
+the build adopted from a sibling under the same key, and never one from `archive` —
+otherwise archive.org copies would be laundered into the cache as if they were store
+originals):
 
 ```bash
 gh release view "$pkg" || gh release create "$pkg" --title "$pkg" --notes ""
