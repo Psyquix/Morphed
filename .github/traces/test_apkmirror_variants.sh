@@ -86,9 +86,13 @@ case_ "v7a unpinned -> absolute oldest" armeabi-v7a BUNDLE "-7-android-apk-downl
 case_ "v7a + other vc -> vc predicate holds" armeabi-v7a BUNDLE "-7-android-apk-download" 2639005
 # Badge kind is a hard filter per pass, so the caller's order decides bundle vs APK.
 case_ "APK pass takes the apk badge" armeabi-v7a APK "-5-android-apk-download" 2639006
-# A catch-all build may not take a row that omits an ABI: no BUNDLE row here is
-# universal, so nothing is eligible. (Negative control: every case above DID resolve.)
-case_ "arch=all refuses a partial bundle" all BUNDLE NONE 2639006
+# A catch-all build (arch=all = the universal build) takes the bundle that carries the
+# WIDEST ABI coverage, not a single-ABI row. -3 (arm64-v8a + armeabi-v7a + x86 + x86_64)
+# outranks the two-ABI bundles even though it lists the newest Minimum Version, and it
+# outranks regardless of the pinned versionCode. This is the reason run 39901278132
+# silently lost Tubi arch=all: the picker used to refuse every multi-ABI bundle.
+case_ "arch=all takes widest 4-ABI bundle" all BUNDLE "-3-android-apk-download" 2639006
+case_ "arch=all unpinned -> widest wins" all BUNDLE "-3-android-apk-download" ""
 # Four-ABI label: matched by membership now, invisible to the old spelling list.
 case_ "x86 inside a 4-ABI label" x86 BUNDLE "-3-android-apk-download" 2639006
 # DPI still constrains: only the 120-480dpi row is allowed, newer Android and all.
@@ -133,8 +137,29 @@ want_cls "arm64-v8a + armeabi-v7a + x86 + x86_64" armeabi-v7a 0
 want_cls "arm64-v8a" arm64-v8a 1
 want_cls "arm64-v8a" armeabi-v7a NONE
 want_cls "armeabi-v7a" arm64-v8a NONE
-want_cls "arm64-v8a + armeabi-v7a" all NONE
+# A catch-all accepts a multi-ABI bundle (it is the split form of universal)...
+want_cls "arm64-v8a + armeabi-v7a" all 0
+want_cls "arm64-v8a + armeabi-v7a + x86 + x86_64" all 0
+want_cls "universal" all 0
+# ...and still refuses a single-ABI row (negative control: the accepted lines above resolve).
+want_cls "arm64-v8a" all NONE
+want_cls "armeabi-v7a" all NONE
 want_cls "" arm64-v8a NONE
+
+# --- arch_width parity (python vs the bash mirror) — the widest-coverage rank input
+py_width() { "$PY" -c "import sys;sys.path.insert(0,'scripts');import apkmirror_search as w;print(w.arch_width(sys.argv[1]))" "$1"; }
+want_width() {
+	local col=$1 want=$2 got
+	got=$(py_width "$col") || fail "arch_width python raised on '$col'"
+	[ "$got" = "$want" ] || fail "python arch_width('$col') = $got, want $want"
+	got=$(_amk_arch_width "$col")
+	[ "$got" = "$want" ] || fail "bash _amk_arch_width('$col') = $got, want $want"
+	printf 'ok  %-46s %s\n' "arch_width('$col')" "$want"
+}
+want_width "universal" 99
+want_width "arm64-v8a" 1
+want_width "arm64-v8a + armeabi-v7a" 2
+want_width "arm64-v8a + armeabi-v7a + x86 + x86_64" 4
 
 # --- bundle before APK (the caller's pass order), and the preferred-format chain
 # reordering it. Unset must stay exactly the historical order — every golden built

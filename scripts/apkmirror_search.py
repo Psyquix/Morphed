@@ -74,6 +74,25 @@ def minapi_rank(node_min_ver: str) -> int:
     return int(m.group(1)) * 100 + int(m.group(2) or 0)
 
 
+def is_catch_all(arch: str) -> bool:
+    """Is this a request that wants one artifact for every device (arch=all/universal)?
+    A catch-all may only take a row that itself carries several ABIs; the ranking then
+    favours the widest such row (see arch_width)."""
+    b = (arch or '').strip().lower()
+    return b in UNRESTRICTED_ARCHES or b in ('all', 'auto', '')
+
+
+def arch_width(node_arch: str) -> int:
+    """How many ABIs a row's Architecture column covers. A universal/noarch build runs
+    everywhere, so it is treated as wider than any concrete split bundle; otherwise the
+    count of '+'-joined ABIs decides, so 'arm64-v8a + armeabi-v7a + x86 + x86_64' beats
+    the two-ABI bundle a catch-all build is otherwise handed."""
+    a = (node_arch or '').strip().lower()
+    if a in UNRESTRICTED_ARCHES:
+        return 99
+    return len([t for t in a.split('+') if t.strip()])
+
+
 def arch_class(node_arch: str, arch: str):
     """Can this row serve the requested arch, and how much of it does it cover?
     0 = covers more ABIs than asked for (one fetch serves several builds), 1 = exactly
@@ -81,16 +100,18 @@ def arch_class(node_arch: str, arch: str):
     membership, not by whole-string equality against a hardcoded list of spellings -
     'arm64-v8a + armeabi-v7a + x86 + x86_64' carries arm-v7a just as the two-ABI form
     does. A catch-all request ('all', 'auto') may only take a row that carries
-    everything."""
+    everything: a multi-ABI bundle IS the split form of a universal build, so it
+    qualifies, but a single-ABI row covers one device family and would lie about the
+    rest, so it stays rejected exactly as it always was."""
     a = (node_arch or '').strip().lower()
     if not a:
         return None
     if a in UNRESTRICTED_ARCHES:
         return 0
     b = (arch or '').strip().lower()
-    if b in UNRESTRICTED_ARCHES or b in ('all', 'auto', ''):
-        return None
     toks = [t.strip() for t in a.split('+') if t.strip()]
+    if is_catch_all(arch):
+        return 0 if len(toks) > 1 else None
     if b not in toks:
         return None
     return 0 if len(toks) > 1 else 1
@@ -99,12 +120,15 @@ def arch_class(node_arch: str, arch: str):
 def apkmirror_search(html_content, dpi, arch, apk_bundle, clean_search_version, search_version, target_vc):
     """Pick the APKMirror variant row this build should download.
 
-    Every predicate narrows the candidate set, then one ranking decides: the lowest
-    'Minimum Version' wins, so the published artifact installs on the oldest device
-    that can run the app rather than on the newest one listed. Fatter arch coverage
-    breaks a tie (a multi-ABI row is one fetch for several builds), then an exact DPI
-    match, then the row's place in the table.
+    Every predicate narrows the candidate set, then one ranking decides. For a normal
+    arch the lowest 'Minimum Version' wins, so the published artifact installs on the
+    oldest device that can run the app rather than the newest listed; fatter arch
+    coverage breaks a tie, then an exact DPI match, then the row's place in the table.
+    For a catch-all request (arch=all/universal) coverage is the whole point, so the
+    WIDEST multi-ABI bundle wins outright and the minimum-Android rank only breaks a tie
+    between equally wide rows.
     """
+    catch_all = is_catch_all(arch)
     dpi_str = dpi if dpi else "nodpi anydpi auto"
     appdpi = ["nodpi", "anydpi"]
     match_any_dpi = False
@@ -192,7 +216,14 @@ def apkmirror_search(html_content, dpi, arch, apk_bundle, clean_search_version, 
         else:
             continue
 
-        key = (minapi_rank(node_min_ver), a_class, d_class, idx)
+        if catch_all:
+            # Widest ABI coverage first (negated, so a fatter bundle sorts smaller),
+            # then the usual oldest-installable / DPI / table-order tiebreakers. a_class
+            # is constant (0) for every surviving catch-all row, so it carries no signal.
+            key = (-arch_width(node_arch),
+                   minapi_rank(node_min_ver), d_class, idx)
+        else:
+            key = (minapi_rank(node_min_ver), a_class, d_class, idx)
         if best_key is None or key < best_key:
             best_key = key
             best_url = dlurl

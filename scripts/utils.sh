@@ -2154,6 +2154,25 @@ _amk_minapi_rank() { # $1=Minimum Version column text
 	fi
 }
 
+# Is the requested arch a catch-all — one artifact meant for every device (arch=all /
+# universal)? A catch-all may only take a row that itself carries several ABIs, and the
+# ranking then favours the widest. Mirrors is_catch_all() in apkmirror_search.py.
+_amk_is_catch_all() { # $1=requested arch token
+	case "${1,,}" in all | universal | noarch | auto | "") return 0 ;; *) return 1 ;; esac
+}
+
+# How many ABIs a row's Architecture column covers. A universal/noarch build runs
+# everywhere, so it outranks any concrete split bundle; otherwise the count of
+# '+'-joined ABIs decides. Mirrors arch_width() in apkmirror_search.py.
+_amk_arch_width() { # $1=Architecture column
+	local a=${1,,} t n=0
+	if [ "$a" = "universal" ] || [ "$a" = "noarch" ]; then printf '99'; return 0; fi
+	local -a toks=()
+	IFS='+' read -ra toks <<<"$a"
+	for t in "${toks[@]}"; do t=${t// /}; [ -n "$t" ] && n=$((n + 1)); done
+	printf '%d' "$n"
+}
+
 # Can one variant row serve the requested arch, and how much of it does it cover?
 # Echoes 0 (the row carries more ABIs than asked for: one fetch serves several builds)
 # or 1 (exactly the requested ABI); rc 1 with no output means unusable. A multi-ABI
@@ -2161,12 +2180,13 @@ _amk_minapi_rank() { # $1=Minimum Version column text
 # spellings - 'arm64-v8a + armeabi-v7a + x86 + x86_64' carries arm-v7a just as the
 # two-ABI form does, and a matcher that only knew the two spellings it had seen used to
 # drop such a row entirely. A catch-all request may only take a row that carries
-# everything. Mirrors arch_class() in scripts/apkmirror_search.py.
+# everything: a multi-ABI bundle is the split form of a universal build, so it qualifies,
+# while a single-ABI row would lie about the rest and stays unusable.
+# Mirrors arch_class() in scripts/apkmirror_search.py.
 _amk_arch_class() { # $1=Architecture column  $2=requested arch token
 	local a=${1,,} b=${2,,} t n=0 hit=false
 	if [ -z "$a" ]; then return 1; fi
 	if [ "$a" = "universal" ] || [ "$a" = "noarch" ]; then printf '0'; return 0; fi
-	case "$b" in all | universal | auto | "") return 1 ;; esac
 	local -a toks=()
 	IFS='+' read -ra toks <<<"$a"
 	for t in "${toks[@]}"; do
@@ -2176,6 +2196,9 @@ _amk_arch_class() { # $1=Architecture column  $2=requested arch token
 			if [ "$t" = "$b" ]; then hit=true; fi
 		fi
 	done
+	if _amk_is_catch_all "$b"; then
+		if [ "$n" -gt 1 ]; then printf '0'; return 0; else return 1; fi
+	fi
 	if [ "$hit" != true ]; then return 1; fi
 	if [ "$n" -gt 1 ]; then printf '0'; else printf '1'; fi
 }
@@ -2262,9 +2285,13 @@ apkmirror_search() {
 		fi
 
 		# Ranking tuple, packed into one integer so the comparison is locale-free and
-		# needs no external sort: (minimum Android, arch coverage, DPI match, table
-		# position). Lowest wins; the trailing row index makes keys unique, so a tie
-		# keeps the row that was seen first (the bottom of the table), as before.
+		# needs no external sort. For a normal arch the fields are (minimum Android, arch
+		# coverage, DPI match, table position), lowest wins. For a catch-all request
+		# coverage is the whole point, so (widest ABI bundle, minimum Android, DPI,
+		# position) — the row count is inverted so a fatter bundle sorts smaller. The
+		# packing keeps every field strictly below the next (n<100, dcls*100<200,
+		# rank*1000 below 1e9), so the lowest integer still means the intended winner, and
+		# the trailing row index makes keys unique so a tie keeps the row seen first.
 		# Mirrors the tuple in apkmirror_search() of scripts/apkmirror_search.py.
 		if ! cls=$(_amk_arch_class "$node_arch" "$arch"); then continue; fi
 		if isoneof "$node_dpi" "${appdpi[@]}"; then
@@ -2275,7 +2302,12 @@ apkmirror_search() {
 			continue
 		fi
 		rank=$(_amk_minapi_rank "$node_min_ver")
-		k=$((rank * 10000 + cls * 1000 + dcls * 100 + n))
+		if _amk_is_catch_all "$arch"; then
+			_amk_w=$(_amk_arch_width "$node_arch")
+			k=$(((99 - _amk_w) * 1000000000 + rank * 1000 + dcls * 100 + n))
+		else
+			k=$((rank * 10000 + cls * 1000 + dcls * 100 + n))
+		fi
 		if [ -z "$best_k" ] || [ "$k" -lt "$best_k" ]; then
 			best_k=$k
 			best_url="$dlurl"
@@ -2623,6 +2655,8 @@ dl_apkmirror() {
 		if [ -z "$dlurl" ]; then
 			if [ -n "$version_code" ]; then
 				wpr "Could not find variant with version code '$version_code' for version '$version' on APKMirror"
+			else
+				wpr "APKMirror lists no build covering arch '$arch' for version '$version'"
 			fi
 			return 1
 		fi
