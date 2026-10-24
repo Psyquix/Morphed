@@ -4,7 +4,7 @@
   "meta": {
     "build": "beta",
     "channel": "beta",
-    "publishedAt": "2026-10-24T16:22:05Z"
+    "publishedAt": "2026-10-24T19:00:17Z"
   },
   "files": {
     "twitter-piko-v12.19.1-release.0-arm64-v8a.apk": {
@@ -347,10 +347,10 @@
       "subVariant": null,
       "packageName": "app.morphe.android.youtube",
       "patchSources": [
-        "MorpheApp/patches-1.49.0-dev.4.mpp"
+        "MorpheApp/patches-1.49.0-dev.5.mpp"
       ],
       "changelogs": [
-        "https://github.com/MorpheApp/morphe-patches/releases/tag/v1.49.0-dev.4"
+        "https://github.com/MorpheApp/morphe-patches/releases/tag/v1.49.0-dev.5"
       ],
       "appliedPatches": [
         "AI channel filter",
@@ -459,8 +459,8 @@
         "Shorts icon style",
         "Player icon style"
       ],
-      "originBuild": "260196",
-      "publishedAt": "2026-10-24T16:21:52Z"
+      "originBuild": "260197",
+      "publishedAt": "2026-10-24T18:59:50Z"
     },
     "youtube-music-morphe-experimental-v9.42.52-arm64-v8a.apk": {
       "name": "youtube-music-morphe-experimental",
@@ -617,10 +617,10 @@
       "subVariant": null,
       "packageName": "app.morphe.android.youtube",
       "patchSources": [
-        "MorpheApp/patches-1.49.0-dev.4.mpp"
+        "MorpheApp/patches-1.49.0-dev.5.mpp"
       ],
       "changelogs": [
-        "https://github.com/MorpheApp/morphe-patches/releases/tag/v1.49.0-dev.4"
+        "https://github.com/MorpheApp/morphe-patches/releases/tag/v1.49.0-dev.5"
       ],
       "appliedPatches": [
         "AI channel filter",
@@ -729,8 +729,8 @@
         "Shorts icon style",
         "Player icon style"
       ],
-      "originBuild": "260196",
-      "publishedAt": "2026-10-24T16:21:52Z"
+      "originBuild": "260197",
+      "publishedAt": "2026-10-24T18:59:50Z"
     }
   }
 }
