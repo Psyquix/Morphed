@@ -75,13 +75,13 @@
       ]
     },
     "reddit-morphe-v2026.24.0-arm64-v8a": {
-      "hash": "254992332068aa20f1e4c1c4188f5ea8",
+      "hash": "6bdb4ee086ede219def7fb8de704ad52",
       "kinds": [
         "apk"
       ]
     },
     "reddit-morphe-experimental-v2026.42.0-arm64-v8a": {
-      "hash": "5f83d6f33156f2bc6d237abac4b4202f",
+      "hash": "568bbb992b4080f153572422453b6114",
       "kinds": [
         "apk"
       ]
@@ -93,13 +93,13 @@
       ]
     },
     "youtube-morphe-v21.23.492-arm64-v8a": {
-      "hash": "23823e1b9e355776ea62ac2300362d5c",
+      "hash": "f881fd6949f182039a67ad5958cd69ca",
       "kinds": [
         "apk"
       ]
     },
     "youtube-morphe-experimental-v21.43.523-arm64-v8a": {
-      "hash": "c9647a9d1ea86f95a44824af802590db",
+      "hash": "3f7ef6d14c3c8430812825f99ed77544",
       "kinds": [
         "apk"
       ]
