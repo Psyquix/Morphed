@@ -63,13 +63,13 @@
       ]
     },
     "youtube-music-morphe-v9.20.53-arm64-v8a": {
-      "hash": "50bd74c166e41c11f3315a5ebbc6eda9",
+      "hash": "606ffb84d4571e2a0d57acac1bcb6a03",
       "kinds": [
         "apk"
       ]
     },
     "youtube-music-morphe-experimental-v9.42.52-arm64-v8a": {
-      "hash": "6e11a8272928de06b0f8dc71ad333bf6",
+      "hash": "9a1062ae4bbdf07028f2a6bfa83e0b92",
       "kinds": [
         "apk"
       ]
@@ -93,7 +93,13 @@
       ]
     },
     "youtube-morphe-v21.23.492-arm64-v8a": {
-      "hash": "8ed47f4591251fd5d93332a22b5f6bf2",
+      "hash": "23823e1b9e355776ea62ac2300362d5c",
+      "kinds": [
+        "apk"
+      ]
+    },
+    "youtube-morphe-experimental-v21.43.523-arm64-v8a": {
+      "hash": "c9647a9d1ea86f95a44824af802590db",
       "kinds": [
         "apk"
       ]
