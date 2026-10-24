@@ -12,8 +12,8 @@
   "morpheapp/morphe-patches": {
     "beta": {
       "com.google.android.apps.youtube.music": "9a2504c9adc3478a5e800e6a3ffb1b6b",
-      "com.google.android.youtube": "81a03eca152f190aae240de22d776ca5",
-      "com.reddit.frontpage": "1424249dda444b9f46d8f68ee16c2347",
+      "com.google.android.youtube": "8a642c1241edc2b3143b9b71df3d8344",
+      "com.reddit.frontpage": "e79ba655f4d47be3941b8de85999e8bd",
       "shared": "201a374ebc6030a4126c3d4f241718f2"
     },
     "stable": {
