@@ -4,7 +4,7 @@
   "meta": {
     "build": "stable",
     "channel": "stable",
-    "publishedAt": "2026-10-23T04:49:29Z"
+    "publishedAt": "2026-10-24T22:20:19Z"
   },
   "files": {
     "reddit-morphe-experimental-v2026.42.0-arm64-v8a.apk": {
@@ -755,10 +755,10 @@
       "subVariant": null,
       "packageName": "com.zhiliaoapp.musically",
       "patchSources": [
-        "SysAdminDoc/patches-0.78.0.mpp"
+        "SysAdminDoc/patches-0.79.0.mpp"
       ],
       "changelogs": [
-        "https://github.com/SysAdminDoc/hushfeed/releases/tag/v0.78.0"
+        "https://github.com/SysAdminDoc/hushfeed/releases/tag/v0.79.0"
       ],
       "appliedPatches": [
         "Advanced downloads",
@@ -831,6 +831,7 @@
         "LIVE controls",
         "Lift text length limits",
         "Limit background traffic",
+        "Load all saved stickers",
         "Location access governor",
         "Long-press controls",
         "Mute feed videos",
@@ -847,6 +848,7 @@
         "Profile background",
         "Remember clear display",
         "Remove avatar rings",
+        "Report a newer phone to effects",
         "Repost diagnostics",
         "Resource and battery governor",
         "Resume videos after scrolling",
@@ -881,8 +883,8 @@
         "Use non-personalized search",
         "Use system font"
       ],
-      "originBuild": "260192",
-      "publishedAt": "2026-10-23T04:49:07Z"
+      "originBuild": "260198",
+      "publishedAt": "2026-10-24T22:19:58Z"
     }
   }
 }
