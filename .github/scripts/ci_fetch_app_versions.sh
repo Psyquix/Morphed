@@ -45,35 +45,38 @@ else
     done
 fi
 
-declare -A cached_versions
+# The order the watcher asks its stores in is the order the engine downloads in:
+# DL_SRCS in scripts/utils.sh is the single implementation of source priority, so the
+# version the watcher records is the version the build is handed first - and a group
+# whose stores are a release apart stops answering differently per run because the
+# scraping happened to reach a different one. Three members are skipped, for the same
+# reasons build_rv skips them:
+#   cache_repo - the cache answers "do you have version X?", never "what is the latest
+#                X?" (docs/cache-repo.md), so it must not become a shadow source of truth
+#   archive    - a mirror of what was already published, never a source of truth
+#   direct     - a bare file URL: its version can only be read off the artifact, which
+#                means downloading it (docs/decisions/0012)
+WATCH_SKIP=("cache_repo" "direct" "archive")
+
+declare -A cached_versions  # dlurl -> "<source>|<version>", so a reused answer says who gave it
 
 while IFS='|' read -r group app; do
     if [ -z "$group" ] || [ -z "$app" ]; then continue; fi
     echo "::group::Fetching version for $group ($app)..."
-    
-    mapfile -t _urls < <(
-        jq -r -s --arg app "$app" '
-            add | .[$app] as $a |
-            ($a["uptodown-dlurl"] // ""),
-            ($a["apkmirror-dlurl"] // ""),
-            ($a["apkpure-dlurl"] // ""),
-            ($a["apkcombo-dlurl"] // ""),
-            ($a["github-dlurl"] // "")
-        ' "${CONFIG_INPUTS[@]}"
-    )
-    uptodown_url="${_urls[0]:-}"
-    apkmirror_url="${_urls[1]:-}"
-    apkpure_url="${_urls[2]:-}"
-    apkcombo_url="${_urls[3]:-}"
-    github_url="${_urls[4]:-}"
 
     dlurls=()
     sources=()
-    [ -n "$uptodown_url" ] && { dlurls+=("$uptodown_url"); sources+=("uptodown"); }
-    [ -n "$apkmirror_url" ] && { dlurls+=("$apkmirror_url"); sources+=("apkmirror"); }
-    [ -n "$apkpure_url" ] && { dlurls+=("$apkpure_url"); sources+=("apkpure"); }
-    [ -n "$apkcombo_url" ] && { dlurls+=("$apkcombo_url"); sources+=("apkcombo"); }
-    [ -n "$github_url" ] && { dlurls+=("$github_url"); sources+=("github"); }
+    for src in "${DL_SRCS[@]}"; do
+        if printf '%s\n' "${WATCH_SKIP[@]}" | grep -qx "$src"; then continue; fi
+        if ! declare -F "get_${src}_resp" >/dev/null; then
+            echo "::warning::$src is in DL_SRCS but lists no versions; skipping it for $app."
+            continue
+        fi
+        url=$(jq -r -s --arg app "$app" --arg k "${src}-dlurl" 'add | .[$app][$k] // ""' "${CONFIG_INPUTS[@]}")
+        if [ -z "$url" ] || [ "$url" = "null" ]; then continue; fi
+        dlurls+=("$url")
+        sources+=("$src")
+    done
 
     if [ ${#dlurls[@]} -eq 0 ]; then
         echo "::warning::No dlurl for $app, skipping"
@@ -82,51 +85,49 @@ while IFS='|' read -r group app; do
     fi
     
     latest_ver=""
+    answered_by=""
     for i in "${!dlurls[@]}"; do
         dlurl="${dlurls[$i]}"
-        source="${sources[$i]}"
+        src_name="${sources[$i]}"
         
         if [ -n "${cached_versions[$dlurl]:-}" ]; then
-            latest_ver="${cached_versions[$dlurl]}"
-            echo "::notice::Reusing cached version for $app: $latest_ver"
+            answered_by="${cached_versions[$dlurl]%%|*}"
+            latest_ver="${cached_versions[$dlurl]#*|}"
+            echo "::notice::Reusing cached version for $app: $latest_ver ($answered_by)"
             break
-        else
-            if [[ "$source" == "uptodown" ]]; then
-                get_uptodown_resp "$dlurl" || { echo "::warning::Failed uptodown resp for $app"; continue; }
-                vers=$(get_uptodown_vers) || { echo "::warning::Failed uptodown vers for $app"; continue; }
-                latest_ver=$(echo "$vers" | get_highest_ver) || true
-            elif [[ "$source" == "apkmirror" ]]; then
-                get_apkmirror_resp "$dlurl" || { echo "::warning::Failed apkmirror resp for $app"; continue; }
-                vers=$(get_apkmirror_vers) || { echo "::warning::Failed apkmirror vers for $app"; continue; }
-                latest_ver=$(echo "$vers" | get_highest_ver) || true
-            elif [[ "$source" == "apkpure" ]]; then
-                get_apkpure_resp "$dlurl" || { echo "::warning::Failed apkpure resp for $app"; continue; }
-                vers=$(get_apkpure_vers) || { echo "::warning::Failed apkpure vers for $app"; continue; }
-                latest_ver=$(echo "$vers" | get_highest_ver) || true
-            elif [[ "$source" == "apkcombo" ]]; then
-                get_apkcombo_resp "$dlurl" || { echo "::warning::Failed apkcombo resp for $app"; continue; }
-                vers=$(get_apkcombo_vers) || { echo "::warning::Failed apkcombo vers for $app"; continue; }
-                latest_ver=$(echo "$vers" | get_highest_ver) || true
-            elif [[ "$source" == "github" ]]; then
-                get_github_resp "$dlurl" || { echo "::warning::Failed github resp for $app"; continue; }
-                vers=$(get_github_vers) || { echo "::warning::Failed github vers for $app"; continue; }
-                latest_ver=$(echo "$vers" | get_highest_ver) || true
-            fi
-            
-            if [ -n "$latest_ver" ]; then
-                cached_versions[$dlurl]="$latest_ver"
-                # Sleep to avoid rate limiting only if we actually fetched
-                sleep $((RANDOM % 5 + 3))
-                break
-            fi
         fi
+
+        if ! get_${src_name}_resp "$dlurl"; then
+            echo "::warning::Could not read the $src_name page for $app ($dlurl); trying the next source."
+            continue
+        fi
+        if ! vers=$(get_${src_name}_vers); then
+            echo "::warning::$src_name failed to list versions for $app ($dlurl); trying the next source."
+            continue
+        fi
+        latest_ver=$(printf '%s\n' "$vers" | get_highest_ver)
+        if [ -z "$latest_ver" ]; then
+            # The page answered and named no version at all. This branch used to be
+            # silent, and the silence was the bug: an empty list looked exactly like a
+            # store with nothing to say, so the group quietly moved to the next source,
+            # whose number was a different release - and every run that lost the race
+            # re-recorded, re-woken and re-rebuilt the app against it.
+            echo "::warning::$src_name listed no version for $app ($dlurl); trying the next source."
+            continue
+        fi
+
+        cached_versions[$dlurl]="${src_name}|${latest_ver}"
+        answered_by="$src_name"
+        # Sleep to avoid rate limiting only if we actually fetched
+        sleep $((RANDOM % 5 + 3))
+        break
     done
     
     if [ -n "$latest_ver" ]; then
-        echo "Latest version for $group is $latest_ver"
+        echo "Latest version for $group is $latest_ver (from $answered_by)"
         jq -n --arg grp "$group" --arg ver "$latest_ver" '{($grp): $ver}' >> fetched_app_versions.jsonl
     else
-        echo "::error::Could not find latest version for $group"
+        echo "::error::Could not find latest version for $group; sources tried: ${sources[*]}"
     fi
     echo "::endgroup::"
 done < check_list.txt

@@ -336,7 +336,10 @@ for adding surface without a measured gain
 
 `DL_SRCS` in [utils.sh](../scripts/utils.sh) is the order every app is attempted
 in; the first source that yields a verified artifact **carrying the requested arch**
-(see the arch-honesty gate above) wins:
+(see the arch-honesty gate above) wins. It is also the order the watcher's version
+scrape asks in ([ci-pipelines.md](ci-pipelines.md)), minus `cache_repo`, `direct` and
+`archive` — reordering this array therefore changes which store gets to decide what a
+tracked app's "latest version" is, so it must stay the order the build prefers.
 
 | # | Source | Notes |
 |---|---|---|
