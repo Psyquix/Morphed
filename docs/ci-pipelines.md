@@ -39,7 +39,7 @@ step's output is the next step's input:
 | Compile Base Configs | `compile_patch_configs.py` | every app's pool membership from `configs/patches/*.toml` |
 | Sync Patch Sources | `sync_patch_sources.py` | discovers all `(patches-source, host)` pairs, lists releases on GitHub/GitLab/Codeberg, rewrites `state/patch_sources.json`, prunes sources no config uses, emits `TRIGGER_STABLE`/`TRIGGER_BETA`/`TRIGGER_BLOCKED` and writes `changed_sources.json` |
 | Fetch App Versions | `ci_fetch_app_versions.sh` | scrapes current store versions (honours `"_check_only_listed"` in `state/app_versions.json`). Sources are asked in `DL_SRCS` order — the engine's own download order, read from `scripts/utils.sh` — so the version recorded is the one the build would be handed first; `cache_repo`, `direct` and `archive` are never asked for a listing (the cache and the mirror answer "do you have X?", not "what is the latest X?", and a direct URL's version only exists in its bytes). Every answer names the source it came from, and a source that loads but lists nothing is warned about by name before the search continues: a silent fall-through is what let one flaky Uptodown scrape hand a group to APKMirror, a release ahead, and record that as an update. Stays **soft** — no source answering at all writes `::error::` and moves on with the previous baseline, because one store rate-limiting the runner must not stall every other app's build |
-| Compare App Versions | `compare` step | `TRIGGER_APP_UPDATE` when a tracked app moved |
+| Compare App Versions | `ci_compare` step | `TRIGGER_APP_UPDATE` when a tracked app moved **up**. Both sides are first reduced to their release key — everything before the first space, because stores print one release two ways (`349.9`, `349.9 - Stable`) — and the new key must beat the old under `get_highest_ver`, the engine's own comparator. A reformat of the same release and a lower version are each refused with a `::warning::` naming both values and leave `state/app_versions.json` byte-identical: re-recording either would re-key the build's cache name and re-patch an APK that never moved |
 | Detect config changes | `ci_detect_config_changes.sh` | always runs: diffs the compiled config against `state/built_shape.json` — its arch set **and** each app's tracked config map — enqueues new apps/arches (`reason: new`), apps whose tracked config moved (`reason: config`, with the field diff written to `changed_apps.json`) and carried-over retries into `state/pending_builds.json`, prunes queue entries whose app/arch left the config (the `built_shape` memory is kept, so re-enabling an app is not a new build request), **re-arms** an entry whose app config changed since it was written (`cfg` fingerprint: attempts reset, park lifted), and emits `TRIGGER_CONFIG_CHANGE` — which means "the watcher's state moved", not "build this": it is the only signal that gets `state/*.json` committed to `data`, and whether a run starts is decided downstream by the enabled-app count in the pool (why: [decisions/0010](decisions/0010-config-change-pending-builds.md), [0014](decisions/0014-config-changes-that-earn-a-rebuild.md)) |
 | Classify triggers | `ci_trigger_flags.sh` | the two questions everyone else asks: `SOURCES_CHANGED`, `ANYTHING_CHANGED` (config change counts toward the latter, never the former) |
 | Check Patch App Updates | `ci_check_app_patches.py` | only when `SOURCES_CHANGED`: downloads the changed bundles and hashes them (`state/patch_file_hashes.json`) to find which apps the new patches actually cover |
@@ -50,12 +50,20 @@ step's output is the next step's input:
 | Notify announcements | `ci_notify_announcements.sh` | ONE message on the NullStore announcement topic (`TG_THREAD_ANNOUNCE`) covering both things the watcher can cause: apps added to the config (`new_apps.json`) and apps it woke because their tracked config moved (`changed_apps.json`, printed as the field diff, e.g. `build-mode: apk → both`). No-op when neither has anything; one send per run, not two notices chasing each other. Mirrored to `DISCORD_WEBHOOK_GITHUB_LOG` |
 | Commit updated state | `commit_data_branch.sh` | pushes **only** `*.json` under `configs/` + `state/` to `data` |
 
-Two design rules worth preserving:
+Some design rules worth preserving:
 
 - **`changed_sources.json` is written once**, by the sync step
   (`derive_source_changes.py`). Config generation, the patch-relevance scan and
   the trigger flags all project from that one record, so three steps can never
   disagree about what moved.
+- **A version is an update only when it goes up, and the watcher asks its stores in
+  the order the engine downloads in.** Both halves are one rule: the version recorded
+  in `state/app_versions.json` must be the answer the build would have got anyway, or a
+  scraping hiccup becomes a release. That record is not just bookkeeping — when a patch
+  bundle advertises no version, `build_rv` patches exactly what the watcher wrote, so a
+  bounce between two stores re-patched and re-released the same APKs on alternate ticks
+  (Discord: `349.9 - Stable` ↔ `350.8 - Stable`, twice in two days). `DL_SRCS` is the
+  order and `get_highest_ver` is the ordering; neither is reimplemented here.
 - **Generation is membership-only.** `ci_generate_configs.sh` sets
   `enabled = false` for apps outside this run's change set and never rewrites a
   version: an app whose `patches-version` is a channel keyword keeps the keyword,
@@ -72,7 +80,7 @@ Two design rules worth preserving:
 |---|---|---|
 | A patch source publishes a release on the stable channel | `TRIGGER_STABLE` | stable pool regenerates and builds |
 | …on the beta channel | `TRIGGER_BETA` | beta pool only |
-| An app's own version changed in a tracked store | `TRIGGER_APP_UPDATE` | both pools reconsider membership (beta gated as above) |
+| An app's own version moved **up** in a tracked store | `TRIGGER_APP_UPDATE` | both pools reconsider membership (beta gated as above) |
 | A source is blocked or unblocked (`404`/`451`/`403` from the forge) | `TRIGGER_BLOCKED` | regenerates membership, so frozen sources drop out and recovered ones return |
 | The config gained a new app or a new architecture, **or** a previously-failed build is still owed a retry, **or** an app's own config changed under a parked entry (re-arm) | `TRIGGER_CONFIG_CHANGE` (non-parked pending list) | pool regenerates with the pending apps force-enabled, and the build runs even though no source or version moved (why: [decisions/0010](decisions/0010-config-change-pending-builds.md)) |
 | Nothing moved | all `0` | no config write, no notification, no build |
