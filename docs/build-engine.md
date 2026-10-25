@@ -380,6 +380,26 @@ Supporting machinery:
   `nc` and to serve nothing for an unknown `nc`). It is used only when the engine has
   already resolved a version code and the arch has a store spelling, it is logged as
   constructed, and the artifact is judged from its bytes like any other.
+- **Which release page a version resolves to** — before any row can be picked, `dl_apkmirror`
+  has to land on the page for that version, and an *old* version is not where the obvious
+  lookups expect it. Slug guessing uses the listing's current `<h1>` and the config's category
+  slug, so a release published under a **former app name** (`truecaller-trusted-caller-id-26-10-6`)
+  is missed; the app's own page lists ten recent releases and `/page/N/` re-renders them, so
+  anything older is invisible there. What remains is a search, and a search must be treated
+  as a *field of candidates*, never as a winner: `?s=<version>` is answered site-wide (APKMirror
+  ignores the app path once a query is present), so links are ordered by the app's own listing
+  path and then **each candidate page is fetched and read for its package until one belongs to
+  the app being built** — a wrong app or a dead link is named in the log and skipped, and a
+  rejected page is remembered so the ten-page walk cannot ask for it again. Taking the first
+  substring hit instead is what handed Truecaller-bufferk's 26.10.6 to `ru.vkusvill` (a grocer
+  that also sits on 26.10.6) and then abandoned APKMirror for the version, though the right link
+  was further down the same page (run 40175646917). The site-wide fallback is queried with the
+  app's **title**, not its listing slug: APKMirror matches display names and answers "No results
+  found matching your query" for `truecaller-caller-id-block 26.10.6`, while
+  `truecaller-spam-call-blocker 26.10.6` returns the release. A candidate budget
+  (`_APKMIRROR_CANDIDATE_LIMIT`) bounds the requests per field, because a store that throttles
+  datacenter IPs should not be walked six ways at once. Pinned in by
+  `.github/traces/test_apkmirror_release_lookup.sh`.
 - **APKMirror variant picking** — one release page lists several uploads of the *same*
   versionCode that differ only in their Architecture / Minimum Version / Screen DPI
   columns, so the row matcher (`scripts/apkmirror_search.py`, mirrored in `utils.sh` for

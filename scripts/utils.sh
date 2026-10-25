@@ -2441,6 +2441,135 @@ _apkmirror_type_order() {
 	fi
 }
 
+# How many candidate release pages one lookup may fetch to settle an identity. The
+# candidates come out of a search listing, where a version number is not an identity, so
+# the field can be several apps wide; fetching all of it would be a queue of requests to a
+# host that throttles datacenter IPs, and the page we want is the first that states the
+# package we are building.
+_APKMIRROR_CANDIDATE_LIMIT=5
+
+# A listing URL as APKMirror writes it inside its own links: site-relative. A config carries
+# the same listing as an absolute URL, so the host has to come off before a link can be
+# compared with it — comparing an absolute path against relative hrefs matches nothing and
+# silently turns the ordering into a no-op.
+_apkmirror_listing_relpath() { # $1=listing url or path
+	local p=$1
+	if [[ "$p" == *"://"* ]]; then
+		p="${p#*://}"
+		p="/${p#*/}"
+	fi
+	if [[ "$p" != /* ]]; then p="/$p"; fi
+	printf '%s' "$p"
+}
+
+# Listing links first, everything else after them, order inside each group untouched. A
+# release page's own listing path is the only part of an href that says whose bytes it
+# serves, so it orders the candidate field even where it cannot prove it.
+# $1=hrefs(newline)  $2=listing path, absolute or relative, no trailing slash ("" = keep order)
+_apkmirror_prefer_listing() {
+	local links=$1 path=$2 rel=""
+	[ -n "$links" ] || return 1
+	if [ -n "$path" ]; then
+		rel=$(_apkmirror_listing_relpath "$path")
+		printf '%s\n%s\n' \
+			"$(echo "$links" | grep -F "$rel/" || true)" \
+			"$(echo "$links" | grep -vF "$rel/" || true)" | awk 'NF && !seen[$0]++'
+	else
+		printf '%s\n' "$links" | awk 'NF && !seen[$0]++'
+	fi
+}
+
+# Which of a page's release links name the requested version, strongest spelling first:
+# the exact slug, then a slug carrying a suffix, then a grouped/short form. Each tier is
+# kept as an ordered candidate list rather than one winner, because the winner used to be
+# 'head -1' of a substring match over a whole site's links.
+# $1=hrefs(newline)  $2=listing path  $3=search_version  $4=clean_search_version
+# $5=short_search_version
+_apkmirror_version_hrefs() {
+	local links=$1 path=$2 sv=$3 csv=$4 ssv=$5 ordered="" out="" hit="" tier=""
+	[ -n "$links" ] || return 1
+	ordered=$(_apkmirror_prefer_listing "$links" "$path")
+	[ -n "$ordered" ] || return 1
+	local -a tiers=()
+	if [ -n "$sv" ]; then tiers+=("F|${sv}-release"); fi
+	if [ -n "$csv" ]; then tiers+=("E|${csv}(-[a-z0-9]+)*-release"); fi
+	if [ -n "$ssv" ] && [ "$ssv" != "$csv" ]; then tiers+=("E|${ssv}(-[0-9])?-release/?$"); fi
+	for tier in "${tiers[@]:0}"; do
+		if [ "${tier%%|*}" = F ]; then
+			hit=$(echo "$ordered" | grep -F "${tier#*|}" || true)
+		else
+			hit=$(echo "$ordered" | grep -E "${tier#*|}" || true)
+		fi
+		if [ -n "$hit" ]; then out+="${hit}"$'\n'; fi
+	done
+	[ -n "$out" ] || return 1
+	printf '%s\n' "$out" | awk 'NF && !seen[$0]++'
+}
+
+# The tier that reads the version out of a link's ANCHOR TEXT instead of its slug, for
+# listings whose slug drops or groups digits. Restricted to release pages: the link a text
+# hit yields used to be whatever href shared the row, including an image or a forum link.
+# $1=html split on </a>  $2=listing path  $3,$4=version spellings to look for in the text
+_apkmirror_text_hrefs() {
+	local split=$1 path=$2 v="" links=""
+	for v in "${3:-}" "${4:-}"; do
+		[ -n "$v" ] || continue
+		links=$(echo "$split" | grep -F "$v" | grep -oP 'href="\K[^"]+' |
+			grep -F -- '-release/' | sed 's/#.*$//' | awk 'NF && !seen[$0]++') || true
+		[ -n "$links" ] || continue
+		_apkmirror_prefer_listing "$links" "$path"
+		return 0
+	done
+	return 1
+}
+
+# Fetch candidate release pages until one of them belongs to the app being built. A page
+# for a different package is skipped, not fatal: the first search hit used to be downloaded
+# on trust and the package guard at the end of dl_apkmirror then abandoned the whole
+# source, so one collision cost the app its only remaining store. A candidate that will not
+# answer at all is skipped for the same reason — a stale link inside a search field is
+# nothing new, and it must not end a walk that has other pages to read. An unreadable
+# package is accepted (a page that states no Play link is what the old code took), but never
+# ahead of a page that does state the right one.
+# Writes the caller's release_url/resp (dynamic scope, never through $(), so an abort is
+# the build's and not a subshell's), and records every page it refused or could not read in
+# the caller's _seen_pages map: the listing is walked ten pages deep and a related-apps link
+# repeats on every one of them, so an unrecorded candidate is fetched once per page for the
+# same answer. rc: 0 accepted | 1 nothing in this field was usable.
+# $1=candidate hrefs(newline)  $2=base_url
+_apkmirror_take_pages() {
+	local hrefs=$1 base=$2 n=0 href page page_pkg
+	[ -n "$hrefs" ] || return 1
+	while IFS= read -r href; do
+		[ -n "$href" ] || continue
+		page="$href"
+		if [[ "$page" != http* ]]; then
+			if [[ "$page" != /* ]]; then page="/$page"; fi
+			page="${base}${page}"
+		fi
+		if [ -n "${_seen_pages[$page]:-}" ]; then continue; fi
+		n=$((n + 1))
+		if [ "$n" -gt "$_APKMIRROR_CANDIDATE_LIMIT" ]; then break; fi
+		if ! _cf_get "$page"; then
+			_seen_pages["$page"]=1
+			wpr "APKMirror result '$page' did not answer for version $version; trying the next result"
+			continue
+		fi
+		if [ -n "${pkg_name:-}" ]; then
+			page_pkg=$(_apkmirror_html_pkg_name "$html")
+			if [ -n "$page_pkg" ] && [ "$page_pkg" != "$pkg_name" ]; then
+				_seen_pages["$page"]=1
+				wpr "APKMirror listed '$page_pkg' for version $version instead of '$pkg_name'; trying the next result"
+				continue
+			fi
+		fi
+		release_url="$page"
+		resp="$html"
+		return 0
+	done <<<"$hrefs"
+	return 1
+}
+
 dl_apkmirror() {
 	local url=$1 version=${2// /-} output=$3 arch=$4 dpi=$5 is_bundle=false get_latest_ver=${6:-false} version_code=${7:-}
 	local base_url="https://www.apkmirror.com"
@@ -2539,91 +2668,74 @@ dl_apkmirror() {
 
 	if [ -z "$release_url" ]; then
 		local list_url="${url%/}"
-		local version_href=""
+		local cands=""
+		local -A _seen_pages=()   # release pages already proved to be another app
 
-		# 1. Targeted search query (?s=version) first as inspired by uni-apks
+		# 1. Targeted search query (?s=version) first as inspired by uni-apks. APKMirror
+		# ignores the app path as soon as a search query is present and answers site-wide,
+		# so what comes back is a field of candidates, not an answer.
 		local search_target_url="${list_url}/?s=${clean_version}"
 		if _cf_get "$search_target_url" 2>/dev/null && [ -n "$html" ]; then
 			local s_flat=$(echo "$html" | tr -d '\n\r')
 			local s_split="${s_flat//<\/a>/<\/a>
 }"
-			local s_links=$(echo "$s_split" | grep -oP 'href="\K/apk/[^"]+')
-			version_href=$(echo "$s_links" | grep -F "$search_version-release" | head -1) || true
-			if [ -z "$version_href" ]; then
-				version_href=$(echo "$s_split" | grep -F "$version" | grep -oP 'href="\K/apk/[^"]+' | grep -F -- '-release/' | head -1) || true
+			local s_links=$(echo "$s_split" | grep -oP 'href="\K/apk/[^"]+' | sed 's/#.*$//' | awk 'NF && !seen[$0]++')
+			cands=$(_apkmirror_version_hrefs "$s_links" "$list_url" "$search_version" "$clean_search_version" "$short_search_version") || true
+			if [ -z "$cands" ]; then
+				cands=$(_apkmirror_text_hrefs "$s_split" "$list_url" "$version" "$clean_version") || true
 			fi
-			if [ -n "$version_href" ]; then
-				release_url="$base_url$version_href"
-				_cf_get "$release_url" || return 1
-				resp="$html"
+			if [ -n "$cands" ]; then
+				# A field with no usable answer is not a failure of the source: the walk
+				# continues to the listing and then to the site search, and only an empty
+				# walk reports the version as missing.
+				_apkmirror_take_pages "$cands" "$base_url" || true
 			fi
 		fi
 
+		# 2. The listing itself, page by page. Links outside this app's own listing path
+		# ('Apps related to …') are ordered last rather than dropped: a renamed app can
+		# publish under a path the config does not carry, and its page still states the
+		# package, which is what decides.
 		if [ -z "$release_url" ]; then
 			for page_num in $(seq 1 10); do
-			local page_url="$list_url/"
-			[[ $page_num -gt 1 ]] && page_url="$list_url/page/$page_num/"
-			_cf_get "$page_url" || return 1
-			
-			
-			local html_flat=$(echo "$html" | tr -d '\n\r')
-			local html_split="${html_flat//<\/a>/<\/a>
+				local page_url="$list_url/"
+				if [ "$page_num" -gt 1 ]; then page_url="$list_url/page/$page_num/"; fi
+				_cf_get "$page_url" || return 1
+
+				local html_flat=$(echo "$html" | tr -d '\n\r')
+				local html_split="${html_flat//<\/a>/<\/a>
 }"
-
-			local all_links=$(echo "$html_split" | grep -oP 'href="\K/apk/[^"]+')
-			
-			# 1. Exact URL match (strict)
-			version_href=$(echo "$all_links" | grep -F "$search_version-release" | head -1) || true
-			
-			# 2. Exact text match
-			if [ -z "$version_href" ]; then
-				version_href=$(echo "$html_split" | grep -F "$version" | grep -oP 'href="\K[^"]+' | head -1) || true
-			fi
-			
-			# 3. Clean text match
-			if [ -z "$version_href" ] && [ -n "$clean_version" ] && [ "$clean_version" != "$version" ]; then
-				version_href=$(echo "$html_split" | grep -F "$clean_version" | grep -oP 'href="\K[^"]+' | head -1) || true
-			fi
-
-			# 4. Clean URL match
-			if [ -z "$version_href" ] && [ -n "$clean_search_version" ]; then
-				version_href=$(echo "$all_links" | grep -E "${clean_search_version}(-[a-z0-9]+)*-release" | head -1) || true
-			fi
-
-			# 5. Safe Short URL match (for grouped versions)
-			if [ -z "$version_href" ] && [ -n "$short_search_version" ] && [ "$short_search_version" != "$clean_search_version" ]; then
-				version_href=$(echo "$all_links" | grep -E "${short_search_version}(-[0-9])?-release/?$" | head -1) || true
-			fi
-
-				if [ -n "$version_href" ]; then
-					release_url="$base_url$version_href"
-					_cf_get "$release_url" || return 1
-					resp="$html"
-					break
+				local all_links=$(echo "$html_split" | grep -oP 'href="\K[^"]+' | grep -F -- '-release/' | sed 's/#.*$//' | awk 'NF && !seen[$0]++')
+				cands=$(_apkmirror_version_hrefs "$all_links" "$list_url" "$search_version" "$clean_search_version" "$short_search_version") || true
+				if [ -z "$cands" ]; then
+					cands=$(_apkmirror_text_hrefs "$html_split" "$list_url" "$version" "$clean_version") || true
+				fi
+				if [ -n "$cands" ]; then
+					_apkmirror_take_pages "$cands" "$base_url" || true
+					if [ -n "$release_url" ]; then break; fi
 				fi
 			done
 		fi
-		
-		# Fallback to direct search if not found on first 5 pages
+
+		# 3. Site-wide search. The query has to name the APP: APKMirror matches display
+		# names and answers "No results found matching your query" for a listing slug —
+		# measured on the Truecaller case, 'truecaller-caller-id-block 26.10.6' returns
+		# nothing while the h1 title's slug 'truecaller-spam-call-blocker 26.10.6' returns
+		# the release. With no title to read, the old slug query is kept rather than
+		# invented from the app name.
 		if [ -z "$release_url" ]; then
-			local search_list_url="https://www.apkmirror.com/?post_type=app_release&searchtype=apk&s=${__APKMIRROR_CAT__}+${version}"
+			local search_name="${apkmname:-${__APKMIRROR_CAT__}}"
+			local search_list_url="https://www.apkmirror.com/?post_type=app_release&searchtype=apk&s=${search_name}+${version}"
 			__SILENT_CF_GET__=true _cf_get "$search_list_url" || true
 			if [ -n "$html" ] && [ "$html" != "null" ]; then
 				local search_links=""
 				if [[ "$html" != *"No results found matching your query"* ]]; then
-					search_links=$($HTMLQ --attribute href "div.appRow h5 a" <<<"$html")
+					search_links=$($HTMLQ --attribute href "div.appRow h5 a" <<<"$html") || true
+					search_links=$(printf '%s\n' "$search_links" | grep -F -- '-release/' | sed 's/#.*$//' | awk 'NF && !seen[$0]++') || true
 				fi
-				
-				# Try to find exact version match first to be safe
-				version_href=$(echo "$search_links" | grep -F "$search_version-release" | head -1) || true
-				if [ -z "$version_href" ] && [ -n "$clean_search_version" ]; then
-					version_href=$(echo "$search_links" | grep -E "${clean_search_version}(-[a-z0-9]+)*-release" | head -1) || true
-				fi
-
-				if [ -n "$version_href" ]; then
-					release_url="$base_url$version_href"
-					_cf_get "$release_url" || return 1
-					resp="$html"
+				cands=$(_apkmirror_version_hrefs "$search_links" "$list_url" "$search_version" "$clean_search_version" "$short_search_version") || true
+				if [ -n "$cands" ]; then
+					_apkmirror_take_pages "$cands" "$base_url" || true
 				fi
 			fi
 		fi
@@ -2634,12 +2746,10 @@ dl_apkmirror() {
 		fi
 	fi
 
-	# APKMirror's fuzzy search fallback can resolve to an unrelated app's
-	# release page (e.g. a superseded version grabbing the top search hit),
-	# which then wastes a bundle download + merge before the post-download
-	# package guard rejects it. Verify the discovered page's package against
-	# the expected pkg_name first; only reject when the page clearly belongs
-	# to a different app (an empty extraction keeps prior behavior).
+	# Last line of defence for a page this function did not choose itself — the config's
+	# apkmirror-example-url path. A search candidate is now package-checked by
+	# _apkmirror_take_pages before it is accepted, so a fuzzy collision costs one skipped
+	# link instead of the whole source; an empty extraction still keeps prior behaviour.
 	if [ -n "${pkg_name:-}" ] && [ -n "$resp" ]; then
 		local page_pkg
 		page_pkg=$(_apkmirror_html_pkg_name "$resp")

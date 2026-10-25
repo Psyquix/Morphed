@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!--
+	Fixture: a search field whose collisions come BEFORE the answer, and where none of the
+	links sits under the listing path the config carries — so the path cannot order the
+	right one first and the lookup has to walk the field: fetch a candidate, read the package
+	its own page states, skip it, repeat. This is the case that used to cost the app the
+	whole source: the first hit was downloaded on trust, the package guard rejected it, and
+	dl_apkmirror returned instead of trying the next result.
+-->
+<html>
+
+<body>
+    <div class="mainItemContainer">
+        <div class="table-row headerFont smallFontText appRow">
+            <div class="table-cell withIcon pad verScroll">
+                <h5><a href="/apk/vkusvill/vkusvill-delivery/vkusvill-delivery-26-10-6-release/">ВкусВилл 26.10.6</a>
+                </h5>
+            </div>
+        </div>
+        <div class="table-row headerFont smallFontText appRow">
+            <div class="table-cell withIcon pad verScroll">
+                <h5><a href="/apk/vkusvill/vkusvill-delivery-2/vkusvill-delivery-2-26-10-6-release/">ВкусВилл 2
+                        26.10.6</a></h5>
+            </div>
+        </div>
+        <div class="table-row headerFont smallFontText appRow">
+            <div class="table-cell withIcon pad verScroll">
+                <h5><a href="/apk/true-software-india-ab/truecaller-trusted-caller-id/truecaller-trusted-caller-id-26-10-6-release/">Truecaller:
+                        Trusted Caller ID 26.10.6</a></h5>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
