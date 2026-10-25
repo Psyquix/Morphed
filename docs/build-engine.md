@@ -264,26 +264,40 @@ for adding surface without a measured gain
    alike — so a universal file takes the shared `-all` key that both arch jobs then reuse
    from that single fetch, and an arch-specific file can never be adopted by somebody
    else's build.
-5. **Arch trimming** — one keep-list decides both halves (`_striplibs_keep_of_arch`).
-   Bundles go through `_trim_bundle_for_arch`, which drops whole foreign-ABI `config.*`
-   members; a plain APK goes through `_strip_apk_abis`, which reads the archive's own
-   entry list and deletes foreign `lib/<abi>/…` entries by exact name — never by a
-   wildcard, because `lib/x86/*` silently misses a `./`-rooted archive (rc 12, a warning
-   the old `|| :` threw away) while the `*lib/x86/*` that catches it also deletes an app's
-   `assets/engine/lib/x86/…` payload. Only Android's own ABI directory names are
-   candidates, so an app's `lib/<dir>` that names no ABI is left alone. The rewrite lands
-   through a temp file and one rename, and a failure ends that app's build rather than
-   publishing an unstripped artifact. Result is cached as
-   `<prefix>-<version>-<arch>.stripped.<ext>`. A morphe build then states the same
-   decision to the CLI as `--striplibs <keep-list>`, which filters at output assembly
-   rather than on the input: a no-op wherever the engine already removed those entries,
-   and otherwise the only thing that reaches a bundle's `base.apk` libs or a `lib/<dir>`
-   that names no ABI at all. `all` means **arm universal**: `arm64-v8a` and
+5. **Arch trimming** — one keep-list (`_striplibs_keep_of_arch`) and **one decision about
+   who applies it** (`_patcher_strips_libs`). Bundles go through `_trim_bundle_for_arch`,
+   which drops whole foreign-ABI `config.*` members — a bundle member is never rewritten,
+   only removed, so the split APKs keep the signatures they were published with.
+   A plain APK is where the two halves differ: for a morphe build the flag
+   `--striplibs <keep-list>` filters the ABIs at output assembly and the input is staged
+   **unchanged** (a `cp` onto the same `<prefix>-<version>-<arch>.stripped.apk` path); for
+   every other patcher — and for `RVB_MORPHE_STRIPLIBS=false` — the engine rewrites it with
+   `_strip_apk_abis`, which reads the archive's own entry list and deletes foreign
+   `lib/<abi>/…` entries by exact name — never by a wildcard, because `lib/x86/*` silently
+   misses a `./`-rooted archive (rc 12, a warning the old `|| :` threw away) while the
+   `*lib/x86/*` that catches it also deletes an app's `assets/engine/lib/x86/…` payload.
+   Only Android's own ABI directory names are candidates, so an app's `lib/<dir>` that names
+   no ABI is left alone. The rewrite lands through a temp file and one rename, and a failure
+   ends that app's build rather than publishing an unstripped artifact. Either way the
+   `<prefix>-<version>-<arch>.stripped.<ext>` path is also the reuse guard: a table build
+   that already staged that input for another mode does not stage it again.
+
+   **Why a morphe input must not be rewritten:** the APK Signing Block is not an entry — it
+   sits between the local file data and the central directory — so anything that rebuilds
+   the archive from the central directory drops it with the entries it deletes (`zip -d`
+   returning 0 was measured doing exactly that, leaving v2/v3 absent and v1 referencing
+   files that are gone). The patcher then holds an unsigned APK and every patch that reads
+   the **stock** certificate — the spoof-signature family, the universal microG metadata
+   patch — aborts with `NoCertificateException` after the archive has already been decoded
+   (the failure [j-hc/revanced-magisk-module#848](https://github.com/j-hc/revanced-magisk-module/issues/848)
+   reports for merged bundles). Nothing catches it earlier: `check_sig` only answers for a
+   package pinned in `sig.txt`. So the strip runs once, in the component that can do it
+   without destroying the archive; `all` means **arm universal**: `arm64-v8a` and
    `armeabi-v7a`, no x86 ABI, whichever artifact format the vendor shipped (an `all`
    bundle is otherwise copied whole, so the flag is what makes the two paths agree).
    Publishing x86/x86_64 would be its own decision, not a side effect of the download
-   source. `RVB_MORPHE_STRIPLIBS=false` drops the flag and patches from exactly the
-   inputs it did before.
+   source. `RVB_MORPHE_STRIPLIBS=false` drops the flag and hands the engine's rewritten
+   input back — the bisect switch, at the price of the certificate-reading patches above.
 6. **Patching** — `patch_apk` dispatches on the tool kind resolved by the patcher
    registry (see below) and records which patches the tool reports as applied.
 7. **Naming and metadata** — `aapt2`/`aapt` re-reads the patched manifest, so a

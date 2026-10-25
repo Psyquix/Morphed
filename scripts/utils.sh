@@ -86,13 +86,17 @@ RVB_INSTAFEL_DEFAULT_PATCHES="${RVB_INSTAFEL_DEFAULT_PATCHES:-unlock_developer_o
 # RVB_MORPHE_PASSTHROUGH=false to revert to the old merge-at-download flow.
 RVB_MORPHE_PASSTHROUGH="${RVB_MORPHE_PASSTHROUGH:-true}"
 
-# Morphe's own native-lib strip, on top of the engine's trim and _strip_apk_abis rather
-# than instead of them: where the engine already removed the foreign ABIs it is a no-op,
-# and it reaches the two things a rewrite of the input cannot - the multi-ABI libs a
-# bundle's base.apk carries, and any lib/<dir> that names no ABI, which _strip_apk_abis
-# deliberately leaves alone rather than claiming to know. Both sides read the one
-# keep-list, _striplibs_keep_of_arch. Set RVB_MORPHE_STRIPLIBS=false to drop the flag and
-# patch exactly as before - the bisect switch, same shape as the passthrough knob above.
+# Morphe's own native-lib strip: --striplibs filters at output assembly, so it reaches the
+# two things a rewrite of the input cannot - the multi-ABI libs a bundle's base.apk
+# carries, and any lib/<dir> that names no ABI, which _strip_apk_abis deliberately leaves
+# alone rather than claiming to know. Both sides read the one keep-list,
+# _striplibs_keep_of_arch. On a plain APK the flag REPLACES the engine's rewrite instead of
+# stacking on it: deleting entries from a signed archive deletes its signing block too, so
+# an engine-rewritten input reaches the patcher unsigned (_patcher_strips_libs keeps the
+# two decisions in one place). The bundle trim is unaffected - a bundle member is never
+# rewritten, only dropped whole. Set RVB_MORPHE_STRIPLIBS=false to drop the flag and go
+# back to patching a stripped input - the bisect switch, same shape as the passthrough knob
+# above.
 RVB_MORPHE_STRIPLIBS="${RVB_MORPHE_STRIPLIBS:-true}"
 
 declare -gA __PREBUILTS_CACHE__
@@ -1814,9 +1818,30 @@ _trim_bundle_for_arch() {
 	return 0
 }
 
+# Who removes the foreign-ABI native libs of a plain-APK build: the patcher, from the flag
+# this engine passes it, or the engine, by rewriting the input.
+#
+# Rewriting a signed archive is not a free edit. The APK Signing Block sits between the
+# local file data and the central directory, so it is not an entry, and a tool that rebuilds
+# the archive from the central directory drops it along with the entries it deletes -
+# measured on a signed multi-ABI apk with info-zip "zip -d" returning 0: the block's magic
+# is gone, so v2/v3 have nothing to verify and v1 is left referencing files that no longer
+# exist. The patcher then holds an unsigned apk, and the patches that ask for the *stock*
+# certificate - the spoof-signature family, the universal microG metadata patch - abort
+# with NoCertificateException after the archive has already been decoded. Nothing notices
+# in time: check_sig only answers for a package pinned in sig.txt, and an unpinned one
+# answers nothing at all.
+#
+# So where the patcher can do this job itself from the same keep-list, the input has to
+# reach it byte for byte. morphe-desktop is the only tool with --striplibs.
+_patcher_strips_libs() {
+	[ "${PATCHER_KIND:-}" = morphe ] && [ "$RVB_MORPHE_STRIPLIBS" = true ]
+}
+
 # Strip the native-lib ABIs a plain-APK build of this arch must not carry, writing the
 # result to $2. The keep-list is the one this build hands to --striplibs, so the engine's
-# rewrite and the patcher's strip state the same decision.
+# rewrite and the patcher's strip state the same decision - and a build gets one of the two
+# behaviours, never both (_patcher_strips_libs picks).
 #
 # Deletion happens by exact entry name read off the archive, never by a wildcard: zip
 # matches the stored name, so "lib/x86/*" leaves a "./"-rooted "./lib/x86/libso.so"
@@ -6345,7 +6370,16 @@ build_rv() {
 		else
 			stock_apk_to_patch="${TEMP_DIR}/${file_prefix}-${version_f}-${arch_f}.stripped.apk"
 			if [ ! -f "$stock_apk_to_patch" ]; then
-				if ! _strip_apk_abis "$stock_apk" "$stock_apk_to_patch" "$arch_f"; then
+				if _patcher_strips_libs; then
+					# The name says "stripped", the bytes must not be: the patcher filters the
+					# ABIs at output assembly from the same keep-list, and rewriting the archive
+					# here would only cost it the signing block the stock apk was signed with.
+					if ! cp -f "$stock_apk" "$stock_apk_to_patch"; then
+						epr "Failed to stage stock apk for $arch_f"
+						rm -f "$stock_apk_to_patch"
+						return 0
+					fi
+				elif ! _strip_apk_abis "$stock_apk" "$stock_apk_to_patch" "$arch_f"; then
 					epr "Failed to strip foreign ABIs for $arch_f"
 					rm -f "$stock_apk_to_patch"
 					return 0
@@ -6353,11 +6387,11 @@ build_rv() {
 			fi
 		fi
 
-		# Morphe's own strip, stating the same keep decision at output assembly: a no-op
-		# when the engine's rewrite already removed those entries, and otherwise the only
-		# thing that reaches a bundle's base.apk libs or a lib/<dir> that names no ABI -
+		# The other half of that one decision, and the only strip a morphe build of a plain
+		# APK gets: the flag states the same keep-list at output assembly, which is also the
+		# only thing that reaches a bundle's base.apk libs or a lib/<dir> that names no ABI -
 		# neither of which _strip_apk_abis or the member trim can touch.
-		if [ "${PATCHER_KIND:-}" = morphe ] && [ "$RVB_MORPHE_STRIPLIBS" = true ]; then
+		if _patcher_strips_libs; then
 			patcher_args+=("--striplibs" "$(_striplibs_keep_of_arch "$arch_f")")
 		fi
 
