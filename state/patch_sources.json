@@ -18,8 +18,8 @@
     "stable_date": "2026-10-24T20:28:45Z"
   },
   "crimera/piko": {
-    "beta": "v3.11.0-dev.2",
-    "beta_date": "2026-10-25T06:54:41Z",
+    "beta": "v3.11.0-dev.3",
+    "beta_date": "2026-10-25T17:20:44Z",
     "blocked": false,
     "host": "github",
     "repo": "crimera/piko",
