@@ -3598,16 +3598,17 @@ get_uptodown_vers() {
 			return 0
 		fi
 	fi
-
-	local vers
-	vers=$(grep -oP '<span class="version">\K[^<]+' <<<"${__UPTODOWN_RESP__:-}" || true)
-	if [ -z "$vers" ] && [ -n "${HTMLQ:-}" ] && [ -x "$HTMLQ" ]; then
-		vers=$($HTMLQ --text ".version" <<<"${__UPTODOWN_RESP__:-}" 2>/dev/null || true)
-	fi
-	if [ "$allow_all" = false ]; then
-		vers=$(grep -iv "\(beta\|alpha\|secondary\)" <<<"$vers" || true)
-	fi
-	echo "$vers"
+	# uptodown.py is the only implementation of this scrape. The grep/htmlq pass that
+	# used to follow it read __UPTODOWN_RESP__, which nothing has assigned since the
+	# scrape moved into python (get_uptodown_resp only normalises the URL now), so it
+	# could never answer anything but empty - and an empty answer is indistinguishable
+	# from "the store has no versions", which is how one flaky scrape silently handed
+	# the watcher a DIFFERENT source, and a version with it.
+	# A missing answer deliberately still returns 0: build.sh calls
+	# `pkgvers=$(get_${dl_from}_vers)` under `set -e`, so a non-zero here aborts the
+	# whole app instead of falling through to the next source. Emptiness is the
+	# caller's to notice - the watcher reports it as a fall-through.
+	echo ""
 }
 
 get_uptodown_pkg_name() {
@@ -3629,12 +3630,10 @@ get_uptodown_pkg_name() {
 		fi
 	fi
 
-	local pkg
-	pkg=$(grep -oP 'play\.google\.com/store/apps/details\?id=\K[a-zA-Z0-9_.]+' <<<"${__UPTODOWN_RESP_PKG__:-}${__UPTODOWN_RESP__:-}" | head -1) || true
-	if [ -z "$pkg" ] && [ -n "${HTMLQ:-}" ] && [ -x "$HTMLQ" ]; then
-		pkg=$($HTMLQ --text "tr.full:nth-child(1) > td:nth-child(3)" <<<"${__UPTODOWN_RESP_PKG__:-}" 2>/dev/null || true)
-	fi
-	echo "$pkg"
+	# Same reason as get_uptodown_vers: no shell fallback, because there is no shell
+	# HTML left to parse. An unanswered package name stays empty with rc 0, and the
+	# caller's own "Could not determine pkg_name" branch is what reports it.
+	echo ""
 }
 
 dl_uptodown() {

@@ -346,7 +346,7 @@ in; the first source that yields a verified artifact **carrying the requested ar
 | 4 | `fdroid` | an F-Droid repo: a package page (versions from the site's `api/v1/packages/<pkg>` JSON, file named `<pkg>_<code>.apk`) or a bare repo root (versions, exact file names and declared ABIs read from `index-v1.jar`, falling back to `index.jar`). One APK per version code, so no variant picker; `pkg-name` is required for the repo-root form |
 | 5 | `archive` | `archive.org` item, the long-term fallback for delisted versions |
 | 6 | `apkmirror` | variant picker ranks the release's rows (see below); package/version read from the HTML |
-| 7 | `uptodown` | |
+| 7 | `uptodown` | versions and package name come from [uptodown.py](../scripts/uptodown.py) alone (its `/apps/<id>/versions/<page>` JSON); there is no shell fallback, because the one that used to follow the call parsed `__UPTODOWN_RESP__`, a variable nothing has set since the scrape moved into python. When the call answers nothing, `get_uptodown_vers` still returns 0 with empty output on purpose: `build_rv` calls it as `$(get_…_vers)` under `set -e`, where a non-zero would abort the app instead of letting the next source try |
 | 8 | `apkpure` | one link per ABI read off `/downloading/<v>` → `/download/<v>` → `/download`, the page's featured `#download_link` being only one candidate, with the store's own `?versionCode=&nc=` link form as the last resort when a page yields nothing; XAPK handling in `_apkpure_install_xapk` |
 | 9 | `apkcombo` | trusts the served filename over its object key |
 
