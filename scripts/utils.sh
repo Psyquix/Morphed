@@ -1109,8 +1109,11 @@ parse_arch_mapping() {
 		return 0
 	fi
 	local matched="" entry
-	local old_ifs="$IFS"
-	IFS='|'
+	# Scope IFS to this function instead of saving and restoring it: the caller may
+	# have `unset IFS` (build_rv does, after its bundle-list split), which reads as
+	# unbound under set -u, and restoring an empty value would leave that caller with
+	# no word splitting at all. A local assignment reverts on return either way.
+	local IFS='|'
 	for entry in $mapping; do
 		if [[ "$entry" =~ ^[[:space:]]*([^:]+)[[:space:]]*:[[:space:]]*(.*)$ ]]; then
 			local e_arch="${BASH_REMATCH[1]//[[:space:]]/}"
@@ -1122,7 +1125,6 @@ parse_arch_mapping() {
 			fi
 		fi
 	done
-	IFS="$old_ifs"
 	echo "$matched"
 }
 

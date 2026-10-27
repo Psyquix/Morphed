@@ -193,6 +193,26 @@ _publish_stock_artifact "$pub/mismatch.xapk" "$pub" com.mis 3.0.0 -77 arm-v7a ||
 [[ "$(ls "$pub" | grep -c 'com.mis-3.0.0-77-arm-v7a')" = 0 ]] ||
 	fail "a mis-served bundle also landed under the requested arch name"
 
+# --- version-code map parsing, under the caller's deliberate `unset IFS` ----------
+# build_rv ends its bundle-list split with `unset IFS` (utils.sh), and the map form
+# "arm64-v8a: 111 | arm-v7a: 222" is the only path of parse_arch_mapping that reads
+# "$IFS" - to save it. Under set -u that is an unbound variable, and it killed
+# MicrosoftWord-kveld9 with "IFS: unbound variable" in run 40476750624, the first
+# config to use the map form. Saving and restoring is also wrong here: IFS was
+# *unset*, an unset value means bash's default splitting, and setting it back to ""
+# would leave the caller with no word splitting at all. So the function scopes it.
+(
+	set -u
+	unset IFS
+	[ "$(parse_arch_mapping "arm64-v8a: 111 | arm-v7a: 222" arm64-v8a)" = "111" ] || exit 1
+	[ "$(parse_arch_mapping "arm64-v8a: 111 | arm-v7a: 222" arm-v7a)" = "222" ] || exit 1
+	# Negative controls: the bare form passes through, an unmatched arch answers empty.
+	[ "$(parse_arch_mapping "123" arm64-v8a)" = "123" ] || exit 1
+	[ "$(parse_arch_mapping "arm64-v8a: 111" x86_64)" = "" ] || exit 1
+	# And the caller's IFS comes back exactly as it went in: unset, not "".
+	[ -z "${IFS+set}" ] || exit 1
+) || fail "parse_arch_mapping needs unset IFS and a set value (run 40476750624)"
+
 GITHUB_REPOSITORY="$_gr_saved"
 rm -rf "$pub"
 rm -rf "$apk_cache_dir"
