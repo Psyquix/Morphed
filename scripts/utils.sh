@@ -6154,9 +6154,15 @@ build_rv() {
 					# Retry: with parallel builds a sibling process can create the same
 					# release tag between our view (404) and create (422 tag exists);
 					# the next attempt's view finds it. Upload races are transient too.
+					#
+					# The tag stays the package name - dl_cache_repo resolves an app by
+					# `releases/tags/<pkg>` and matches assets by their own names, never by
+					# this title - but the title is the label a person sees and searches in
+					# the store, so it carries the app name, with the package name behind it.
 					for _ua_att in 1 2 3; do
 						if { gh release view "$pkg_name" --repo "$UPLOAD_APKS_REPO" >/dev/null 2>&1 || \
-							gh release create "$pkg_name" --repo "$UPLOAD_APKS_REPO" --title "$pkg_name" --notes ""; } && \
+							gh release create "$pkg_name" --repo "$UPLOAD_APKS_REPO" \
+								--title "${app_name:-$pkg_name}" --notes ""; } && \
 							gh release upload "$pkg_name" "$_ua_file" --repo "$UPLOAD_APKS_REPO" --clobber; then
 							_ua_ok=1
 							break

@@ -20,7 +20,7 @@ contract. The contributor workflow (getting write access, the three equivalent
 
 | Thing | Shape |
 |---|---|
-| Releases | **one release per Android package name**, tag = `com.facebook.katana`, title = the same, empty notes |
+| Releases | **one release per Android package name**, tag = `com.facebook.katana` (the lookup key — `dl_cache_repo` asks for `releases/tags/<pkg>` and matches asset names, so nothing reads the title), title = the app name (`Facebook` from `app-name`, or the package name when a config has none), empty notes |
 | Assets | `<pkg>-<version>[-<versionCode>]-<arch>.<ext>` |
 | `<arch>` | `all`, `universal`, `common`, `arm64-v8a`, `arm-v7a`, `armeabi-v7a`, `x86`, `x86_64` |
 | `<ext>` | `apk`, `xapk`, `apkm`, `apks` |
