@@ -5051,18 +5051,9 @@ verify_downloaded_apk() {
 	return 0
 }
 
-# Which ABIs an artifact actually carries, read off its contents.
-#
-# Prints one build-arch token per line (arm64-v8a, arm-v7a, x86_64, x86), nothing when
-# the artifact has no ABI-specific content, and fails when the file is not a zip.
-# Two shapes have to be understood, and only the first ever was:
-#   merged apk               -> native libraries at lib/<abi>/
-#   bundle (xapk/apkm/apks)  -> nested config.<abi>.apk splits. A listing of one has no
-#                          "lib/" entry at all, so grepping for lib/ concludes "nothing
-#                          arch specific here" about a file whose entire purpose is being
-#                          arch specific - which is how every XAPK came to be called
-#                          universal and cached under the shared -all key.
-_artifact_abis() { # $1=apk or bundle
+# Classify the entries of one zip archive into build-arch tokens, one per line, empty
+# when it holds no ABI-specific content. Fails when the file cannot be listed at all.
+_abis_of_listing() { # $1=apk or bundle
 	local names
 	# The status of unzip itself has to be checked: piping it into awk makes the
 	# pipeline succeed on empty input, which would read a corrupt or truncated download
@@ -5085,6 +5076,40 @@ _artifact_abis() { # $1=apk or bundle
 		# LC_ALL=C: plain sort collates '-' before digits differently per locale, which
 		# would make this output (and so the key derived from it) machine-dependent.
 	} | LC_ALL=C sort -u | grep . || :
+}
+
+# Which ABIs an artifact actually carries, read off its contents.
+#
+# Prints one build-arch token per line (arm64-v8a, arm-v7a, x86_64, x86), nothing when
+# the artifact has no ABI-specific content, and fails when the file is not a zip.
+# Three shapes have to be understood:
+#   merged apk               -> native libraries at lib/<abi>/
+#   bundle (xapk/apkm/apks)  -> nested config.<abi>.apk splits. A listing of one has no
+#                          "lib/" entry at all, so grepping for lib/ concludes "nothing
+#                          arch specific here" about a file whose entire purpose is being
+#                          arch specific - which is how every XAPK came to be called
+#                          universal and cached under the shared -all key.
+#   bundle with no ABI split -> Microsoft Office ships its native code inside base.apk and
+#                          splits only languages and densities, so the container names no
+#                          ABI anywhere. base.apk has to be asked: an empty container
+#                          listing is not evidence of an arch-agnostic file, and "all" is
+#                          the one key every arch build may adopt - which is how an
+#                          arm64-only Word bundle came to be stored as ...-all.apkm.
+_artifact_abis() { # $1=apk or bundle
+	local abis
+	abis=$(_abis_of_listing "$1") || return 1
+	if [ -z "$abis" ] && _bundle_ext_of "$1" >/dev/null 2>&1; then
+		local base
+		base=$(mktemp "${TEMP_DIR:-.}/artifact_abis_XXXXXX.apk") || return 1
+		if ! _bundle_extract_base "$1" "$base"; then
+			rm -f "$base"
+			return 1
+		fi
+		abis=$(_abis_of_listing "$base") || { rm -f "$base"; return 1; }
+		rm -f "$base"
+	fi
+	if [ -n "$abis" ]; then printf '%s\n' "$abis"; fi
+	return 0
 }
 
 # True when the artifact may be cached under the shared "-all" key: it carries no

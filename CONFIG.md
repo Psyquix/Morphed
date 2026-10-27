@@ -364,7 +364,10 @@ bundle download, for nothing.)
 - **Cache**: a bundle is stored under the ABIs it actually carries, read off its
   contents: `${pkg}-${version}-${versionCode}-all.xapk` when it holds every arm ABI or
   none, and `${pkg}-${version}-${versionCode}-arm64-v8a.xapk` when it holds only that
-  one (`.apkm`/`.apks` likewise). A universal bundle is shared: for `arch = all`/`auto`
+  one (`.apkm`/`.apks` likewise). "None" is only concluded after `base.apk` has been
+  read too: some apps (Microsoft Office among them) keep their native libraries there
+  instead of shipping a `config.<abi>` split, and an arm64-only bundle cached as `-all`
+  is one every architecture would then adopt. A universal bundle is shared: for `arch = all`/`auto`
   it goes to morphe whole, and for `arm64-v8a`/`arm-v7a`/`x86`/`x86_64` the engine
   strips only the *other ABIs'* `config.*` members (a `zip -d`, no merge, no re-sign)
   and passes the trimmed bundle, so switching an app from `all` to `both`/`arm64-v8a`

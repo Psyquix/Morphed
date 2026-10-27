@@ -69,9 +69,13 @@ Reading is deliberately narrow:
 The key an artifact is stored under is read off its bytes, never off the arch the build
 happened to ask for: `_publish_stock_artifact` runs `_cache_arch_key` over the fetched
 file — bundle or plain APK alike — so a universal artifact (both arm ABIs, or no ABI
-content at all) takes the shared `-all` name every architecture may adopt, and a
+content anywhere) takes the shared `-all` name every architecture may adopt, and a
 single-ABI artifact takes its own ABI name and can never be mistaken for somebody
-else's. The write is a temp file plus one rename under the per-pkg+version lock, and a
+else's. "Anywhere" matters: a bundle's native code can sit inside `base.apk` instead of
+a `config.<abi>` split (Microsoft Office ships that shape), so the container alone shows
+no ABI and `_artifact_abis` asks `base.apk` before calling the file arch-agnostic —
+otherwise an arm64-only bundle lands under `-all` and any architecture may adopt it.
+The write is a temp file plus one rename under the per-pkg+version lock, and a
 destination that already holds a readable archive is adopted rather than rewritten (and
 not uploaded a second time). That lock deliberately keeps the version code out of its
 name, because the code is only proved by the bytes: when it stayed in the name, the two
