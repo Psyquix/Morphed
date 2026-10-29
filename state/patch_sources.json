@@ -1,7 +1,7 @@
 {
   "MorpheApp/morphe-patches": {
-    "beta": "v1.49.0-dev.10",
-    "beta_date": "2026-10-28T08:25:09Z",
+    "beta": "v1.49.0-dev.11",
+    "beta_date": "2026-10-29T08:24:08Z",
     "blocked": false,
     "host": "github",
     "repo": "MorpheApp/morphe-patches",
