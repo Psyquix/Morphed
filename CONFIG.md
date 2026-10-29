@@ -79,6 +79,25 @@ patcher-args = """\
   -Oanother-option=value \
   """
 
+> [!WARNING]
+> **`patcher-args` is passed through verbatim, and morphe infers each `-O` value's type from its shape.**
+> The builder runs the whole patch command through a single shell-eval pass, so the first layer of
+> quotes you write is consumed there and never reaches the CLI. Morphe then types a `-O` value by how
+> it looks - `1` -> Integer, `1L` -> Long, `1.0`/`1f` -> Float, `true` -> Boolean, `[a,b]` -> List,
+> anything else stays a String. When the patch declared that option as a `stringOption`, handing it a
+> bare number logs `Type java.lang.String was expected but received java.lang.Integer` and
+> **silently keeps the patch's default** - the build still succeeds, just with the wrong value.
+>
+> To send a numeric-looking String, the quote characters have to survive to morphe, so escape one
+> extra layer in the TOML; the CLI then sees `"1"` and takes the String branch:
+>
+> ```toml
+> patcher-args = "-e 'Configurable native backup interval' -Ohours=\\\"1\\\""
+> ```
+>
+> This is unlike `included-patches`/`excluded-patches`, whose patch names the builder re-quotes itself
+> (`join_args`): quotes there are only delimiters and never need escaping.
+
 excluded-patches = """\
   'Some Patch' \
   'Some Other Patch' \
