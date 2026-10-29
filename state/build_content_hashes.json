@@ -1,7 +1,7 @@
 {
   "stable": {
     "reddit-morphe-v2026.24.0-arm64-v8a": {
-      "hash": "07aa86d812aa00529061ef794c2383dc",
+      "hash": "7eae032f8c5c1df6cfbe007fe66c9310",
       "kinds": [
         "apk"
       ]
@@ -19,7 +19,7 @@
       ]
     },
     "reddit-morphe-experimental-v2026.42.0-arm64-v8a": {
-      "hash": "f28481f2fc718d24d38093310d0fb5dd",
+      "hash": "c81b531871fddf3459037b3b788b1262",
       "kinds": [
         "apk"
       ]
