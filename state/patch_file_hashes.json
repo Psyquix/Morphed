@@ -11,10 +11,10 @@
   },
   "morpheapp/morphe-patches": {
     "beta": {
-      "com.google.android.apps.youtube.music": "5997a31d4f87678f5b659cf4e0b83a6e",
-      "com.google.android.youtube": "aa338f9e66a405bc372ef0e0184aa583",
-      "com.reddit.frontpage": "7c3618252e309051791cc7a65553a217",
-      "shared": "611bacde1e2cb8fa57c91a7d8bd61938"
+      "com.google.android.apps.youtube.music": "305a4d8c00c35c134dbd53e8d3487786",
+      "com.google.android.youtube": "54214a8015035246f2a311116f4102fa",
+      "com.reddit.frontpage": "35aa06d91f6e404d49d20501ccf20c62",
+      "shared": "0be2590917eba02d4b0a6618ae2e8519"
     },
     "stable": {
       "com.google.android.apps.youtube.music": "5997a31d4f87678f5b659cf4e0b83a6e",
