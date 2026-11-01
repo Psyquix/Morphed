@@ -4,7 +4,7 @@
   "meta": {
     "build": "beta",
     "channel": "beta",
-    "publishedAt": "2026-11-01T11:34:49Z"
+    "publishedAt": "2026-11-01T15:04:39Z"
   },
   "files": {
     "twitter-piko-v12.19.1-release.0-arm64-v8a.apk": {
@@ -20,10 +20,10 @@
       "subVariant": null,
       "packageName": "com.twitter.android",
       "patchSources": [
-        "crimera/patches-3.11.0-dev.3.mpp"
+        "crimera/patches-3.11.0-dev.4.mpp"
       ],
       "changelogs": [
-        "https://github.com/crimera/piko/releases/tag/v3.11.0-dev.3"
+        "https://github.com/crimera/piko/releases/tag/v3.11.0-dev.4"
       ],
       "appliedPatches": [
         "Add ability to copy media link",
@@ -99,8 +99,8 @@
         "Show sensitive media",
         "Support external downloader"
       ],
-      "originBuild": "260201",
-      "publishedAt": "2026-10-25T19:14:10Z"
+      "originBuild": "260214",
+      "publishedAt": "2026-11-01T15:04:18Z"
     },
     "reddit-morphe-v2026.24.0-arm64-v8a.apk": {
       "name": "reddit-morphe",
