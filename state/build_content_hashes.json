@@ -89,6 +89,12 @@
       "kinds": [
         "apk"
       ]
+    },
+    "tiktok-hushfeed-v47.6.3-arm64-v8a": {
+      "hash": "adddd0e32e1e072ede24da60f1b3bfbf",
+      "kinds": [
+        "apk"
+      ]
     }
   },
   "beta": {
