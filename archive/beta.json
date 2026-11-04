@@ -4,7 +4,7 @@
   "meta": {
     "build": "beta",
     "channel": "beta",
-    "publishedAt": "2026-11-04T06:14:47Z"
+    "publishedAt": "2026-11-04T20:08:12Z"
   },
   "files": {
     "twitter-piko-v12.19.1-release.0-arm64-v8a.apk": {
@@ -99,8 +99,8 @@
         "Show sensitive media",
         "Support external downloader"
       ],
-      "originBuild": "260214",
-      "publishedAt": "2026-11-01T15:04:18Z"
+      "originBuild": "260219",
+      "publishedAt": "2026-11-04T20:07:55Z"
     },
     "reddit-morphe-v2026.24.0-arm64-v8a.apk": {
       "name": "reddit-morphe",
