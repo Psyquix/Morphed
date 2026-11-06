@@ -1,12 +1,12 @@
 {
   "MorpheApp/morphe-patches": {
-    "beta": "v2.1.0-dev.11",
-    "beta_date": "2026-11-05T08:23:09Z",
+    "beta": "v2.1.0-dev.12",
+    "beta_date": "2026-11-06T13:10:15Z",
     "blocked": false,
     "host": "github",
     "repo": "MorpheApp/morphe-patches",
-    "stable": "v2.0.0",
-    "stable_date": "2026-10-30T11:16:04Z"
+    "stable": "v2.1.0",
+    "stable_date": "2026-11-06T14:15:16Z"
   },
   "SysAdminDoc/hushfeed": {
     "beta": "",
