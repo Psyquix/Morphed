@@ -14,8 +14,8 @@
     "blocked": false,
     "host": "github",
     "repo": "SysAdminDoc/hushfeed",
-    "stable": "v0.80.0",
-    "stable_date": "2026-11-02T07:08:58Z"
+    "stable": "v0.81.0",
+    "stable_date": "2026-11-06T01:42:08Z"
   },
   "crimera/piko": {
     "beta": "v3.11.0-dev.4",
