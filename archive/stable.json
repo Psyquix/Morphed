@@ -4,7 +4,7 @@
   "meta": {
     "build": "stable",
     "channel": "stable",
-    "publishedAt": "2026-11-04T20:11:31Z"
+    "publishedAt": "2026-11-06T00:55:44Z"
   },
   "files": {
     "reddit-morphe-experimental-v2026.42.0-arm64-v8a.apk": {
@@ -795,8 +795,8 @@
         "Spoof signature",
         "Start as guest"
       ],
-      "originBuild": "260210",
-      "publishedAt": "2026-10-30T15:06:01Z"
+      "originBuild": "260221",
+      "publishedAt": "2026-11-06T00:55:03Z"
     },
     "reddit-morphe-v2026.40.0-arm64-v8a.apk": {
       "name": "reddit-morphe",
@@ -847,8 +847,8 @@
         "Spoof signature",
         "Start as guest"
       ],
-      "originBuild": "260210",
-      "publishedAt": "2026-10-30T15:06:01Z"
+      "originBuild": "260221",
+      "publishedAt": "2026-11-06T00:55:03Z"
     },
     "youtube-morphe-experimental-v21.43.523-arm64-v8a.apk": {
       "name": "youtube-morphe-experimental",
@@ -1398,8 +1398,8 @@
         "Use non-personalized search",
         "Use system font"
       ],
-      "originBuild": "260216",
-      "publishedAt": "2026-11-02T13:00:42Z"
+      "originBuild": "260221",
+      "publishedAt": "2026-11-06T00:55:03Z"
     }
   }
 }
