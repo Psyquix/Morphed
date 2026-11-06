@@ -1946,16 +1946,13 @@ _strip_apk_abis() { # $1=source apk  $2=destination  $3=build arch
 			*) continue ;;
 		esac
 		if [[ " $keep " == *" $abi "* ]]; then continue; fi
-		# zip folds a leading "./" out of the *pattern* while the stored name keeps it, so
-		# an exact "./lib/x86/libso.so" argument matches nothing and only reports rc 12
-		# (measured). Spelling that prefix as the wildcard it has to be still anchors on
-		# the "./lib/<abi>/<file>" tail: the broad "*lib/<abi>/…" form reaches it too, but
-		# takes an app's "assets/engine/lib/x86/…" payload with it, which is why exact
-		# names are used everywhere else.
+		# zip builds differ on a leading ./: some match the exact stored name,
+		# others only accept the anchored wildcard spelling. Pass both so either
+		# zip implementation works; the wildcard still ends at the stored
+		# ./lib/<abi>/<file> tail and cannot reach assets/engine/lib/<abi>/….
+		drop+=("$name")
 		if [[ "$name" == ./* ]]; then
 			drop+=("*$name")
-		else
-			drop+=("$name")
 		fi
 	done < <(unzip -Z1 "$src" 2>/dev/null | tr -d '\r')
 
