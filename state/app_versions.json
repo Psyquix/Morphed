@@ -27,13 +27,13 @@
     "keys": [
       "Twitter-Piko"
     ],
-    "version": "12.40.1-prod.01"
+    "version": "12.41.0-prod.01"
   },
   "Twitter-Piko-Experimental": {
     "keys": [
       "Twitter-Piko-Experimental"
     ],
-    "version": "12.40.1-prod.01"
+    "version": "12.41.0-prod.01"
   },
   "YouTube-Morphe": {
     "keys": [
@@ -51,12 +51,12 @@
     "keys": [
       "YouTubeMusic-Morphe"
     ],
-    "version": "9.44.56"
+    "version": "9.45.51"
   },
   "YouTubeMusic-Morphe-Experimental": {
     "keys": [
       "YouTubeMusic-Morphe-Experimental"
     ],
-    "version": "9.44.56"
+    "version": "9.45.51"
   }
 }
