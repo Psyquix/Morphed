@@ -11,6 +11,25 @@ on:
       # The Uptodown resolver takes the preferred-format chain as its own argument;
       # test_preferred_format.sh asserts its class-collapse parity with utils.sh.
       - "scripts/uptodown.py"
+      # The version watcher is tested by test_version_watch.sh, which drives these two
+      # scripts for real (sandbox cwd, stubbed scrapes), so a change to either must run
+      # the suite rather than only reach the next scheduled watcher tick.
+      - ".github/scripts/ci_fetch_app_versions.sh"
+      - ".github/scripts/ci_compare_app_versions.sh"
+      # The effective-trigger resolver is driven by test_config_rearm.sh with per-channel
+      # state files, so a change to it must run the suite, not just the next watcher tick.
+      - ".github/scripts/ci_resolve_triggers.sh"
+      # The pre-release marker list is owned by .github/scripts/channels.py and
+      # mirrored by the engine, so a change on either side must run the parity suite
+      # rather than surface as a source whose pre-release tags get recorded as its
+      # stable head.
+      - ".github/scripts/channels.py"
+      # The failure report is tested by test_failure_report.sh, which runs the script for
+      # real against a stubbed curl and asserts the sections a maintainer reads, so a change
+      # to it must run the suite rather than only surface in the next build's notification.
+      - ".github/scripts/build_report_failures.sh"
+      - ".github/scripts/sync_patch_sources.py"
+      - ".github/scripts/compile_patch_configs.py"
       - ".github/traces/**"
   workflow_dispatch:
 
@@ -38,7 +57,13 @@ jobs:
           bash .github/traces/test_bundle_helpers.sh
           bash .github/traces/test_arch_strip.sh
           bash .github/traces/test_apkmirror_variants.sh
+          bash .github/traces/test_apkmirror_release_lookup.sh
+          bash .github/traces/test_apkmirror_flavor_ranking.sh
           bash .github/traces/test_preferred_format.sh
           bash .github/traces/test_direct_source.sh
+          bash .github/traces/test_artifact_identity.sh
           bash .github/traces/test_fdroid_source.sh
           bash .github/traces/test_config_rearm.sh
+          bash .github/traces/test_channel_markers.sh
+          bash .github/traces/test_failure_report.sh
+          bash .github/traces/test_version_watch.sh

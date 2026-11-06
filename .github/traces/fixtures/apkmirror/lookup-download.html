@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<!--
+	Fixture: APKMirror's variant + key pages, served for both requests the download makes.
+	'a.downloadButton' is what the variant page offers and 'id="download-link"' is what the
+	key page resolves to a file; one document carries both so the lookup test can end on a
+	written artifact instead of on a page this fixture does not model.
+
+	Deliberately app-neutral in its own filenames: the same document answers for whichever
+	app the lookup settled on, and an app name in here would be counted as a request for that
+	app by a test that reads the stub's log.
+-->
+<html>
+
+<body>
+    <a class="downloadButton rounded4" href="/download/?key=tracef00">DOWNLOAD
+        APK</a>
+    <a id="download-link" href="https://www.apkmirror.com/d/tracef00/one-android-apk-download/#sig"
+        rel="nofollow">one-android-apk-download.apk</a>
+</body>
+
+</html>

@@ -74,6 +74,56 @@ _artifact_satisfies_arch arm64only.xapk arm-v7a && fail "arm64-only must NOT sat
 _artifact_satisfies_arch vendor.xapk arm-v7a || fail "universal must keep the 32-bit build"
 _artifact_satisfies_arch noarch.apk arm-v7a || fail "arch-agnostic apk satisfies any arch"
 
+# --- a bundle whose native code sits in base.apk instead of a config.<abi> split ---
+# Microsoft Office ships exactly this shape: the container lists base.apk plus language
+# and density splits and names no ABI anywhere. Reading only the container called such a
+# file arch-agnostic, so an arm64-only bundle was cached as <pkg>-…-all.apkm — the one
+# key every architecture is allowed to adopt, which is how a Word build came to be
+# labelled by an arch its bytes do not carry.
+export TEMP_DIR="$t"
+python3 - <<'PY'
+import io, zipfile
+
+def inner(paths):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as z:
+        z.writestr('AndroidManifest.xml', 'M')
+        for p in paths:
+            z.writestr(p, 'x')
+    return buf.getvalue()
+
+with zipfile.ZipFile('baseonly.apkm', 'w', zipfile.ZIP_STORED) as z:
+    z.writestr('base.apk', inner(['lib/arm64-v8a/libso.so']))
+    z.writestr('split_config.en.apk', inner(['res/a.xml']))
+    z.writestr('split_config.xxhdpi.apk', inner(['res/b.xml']))
+with zipfile.ZipFile('basenoarch.apkm', 'w', zipfile.ZIP_STORED) as z:
+    z.writestr('base.apk', inner(['resources.arsc']))
+    z.writestr('split_config.en.apk', inner(['res/a.xml']))
+PY
+
+# The bug, pinned: the container alone names no ABI, which is exactly the empty read
+# that used to be reported as "arch-agnostic" and cached under the shared key.
+[ -z "$(_abis_of_listing baseonly.apkm)" ] \
+	|| fail "expected a container with no ABI split to read empty (that was the bug)"
+[ "$(_artifact_abis baseonly.apkm | tr '\n' ' ')" = "arm64-v8a " ] \
+	|| fail "base-only bundle must read its ABI out of base.apk"
+check_is_universal baseonly.apkm && fail "an arm64-only bundle is not universal"
+[[ "$(_cache_arch_key baseonly.apkm arm64-v8a)" == "arm64-v8a" ]] || fail "key from base.apk (asked arm64)"
+# The requested arch must not drag the key along with it.
+[[ "$(_cache_arch_key baseonly.apkm arm-v7a)" == "arm64-v8a" ]] || fail "key must follow the bytes, not the ask"
+_artifact_satisfies_arch baseonly.apkm arm-v7a \
+	&& fail "an arm64-only base bundle must not satisfy an arm-v7a build"
+
+# Negative control: a bundle with no ABI content in the container OR in base.apk is
+# genuinely arch-agnostic and keeps the shared key — the fallback must not turn every
+# empty read into a guess.
+[[ "$(_cache_arch_key basenoarch.apkm arm-v7a)" == "all" ]] || fail "no-ABI-anywhere bundle should stay all"
+# Negative control: an unreadable file fails, it is never evidence of "no ABI".
+printf 'not a zip at all\n' > junk.apkm
+_artifact_abis junk.apkm && fail "a corrupt bundle must fail, not read as arch-agnostic"
+[ -z "$(find "$t" -maxdepth 1 -name 'artifact_abis_*' 2> /dev/null)" ] \
+	|| fail "the base.apk probe left a temp file behind"
+
 # Learned link index: fetch-once-then-adopt, refuse-without-refetch only on evidence.
 export TEMP_DIR="$t/tmpidx"
 _dlurl_index_record "https://store/x?vc=20" arm64only.xapk

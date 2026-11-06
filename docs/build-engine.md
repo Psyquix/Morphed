@@ -49,6 +49,13 @@ abort — see [ci-pipelines.md](ci-pipelines.md#the-build-job-buildyml).
   means the opposite: no source failed and no APK is missing, the patch set has
   nothing to apply for this version set or this arch, so the report names the bundle
   instead of asking for an upload ([decisions/0009](decisions/0009-effective-patch-set-decides-compatibility.md)).
+  Its optional `bytesVersion` column says a file *was* fetched and its own `versionName` is
+  what the set refuses (the `_rekey_to_bytes` discard): the remedy is still the bundle or the
+  source, never a manual upload, so it stays out of `_dl`.
+- **Zero patches applied** — writing `temp/failures/<slug>_npa.json` and returning 0, for a
+  build the patcher completed successfully while its own result file listed nothing applied.
+  The artifact is refused rather than published, so this record is the only trace the app
+  left; it is settled like `_np` (same inputs, same nothing applied).
 - **Bundle unreadable** — the patch CLI could not **list** the bundle at all: `list-patches`
   itself aborted (run 39786888211: `MorpheApp/morphe-patches v1.48.0`, compiled against
   `morphe-patcher 2.0.0`, loaded by the `morphe-desktop v1.18.1` CLI that still ships
@@ -189,7 +196,7 @@ table per app. For each enabled table `build.sh`:
 ## Parallel pool (`PARALLEL_JOBS`)
 
 The only knob is the env var set in [build.yml](../.github/workflows/build.yml)
-(`PARALLEL_JOBS: "6"`); no config file can change it. `1` — the historical
+(`PARALLEL_JOBS: "3"`); no config file can change it. `1` — the historical
 default — runs the original sequential path untouched. Above that, each table
 build becomes a fresh `bash -c` child that re-sources `utils.sh`:
 
@@ -202,6 +209,14 @@ build becomes a fresh `bash -c` child that re-sources `utils.sh`:
   killed externally without an rc file gets a synthesised `137` rather than
   hanging the drain;
 - `INT` kills in-flight children before running the normal abort sweep.
+
+Width alone is not a bound. Every JVM the engine starts goes through the `java()`
+wrapper, which prepends `-Xmx$RVB_JVM_MAX_HEAP` when that knob is set in the workflow
+env: unset or `0` leaves the JVM default, and a value the JVM would refuse is dropped
+with a warning instead of failing the pool. Without a cap each child may take the JVM
+default of a quarter of physical RAM, and the children then add up to more than the
+hosted runner holds, which is how this job used to be killed mid-pool with SIGTERM -
+the failure and the sizing are in [ci-pipelines.md](ci-pipelines.md) item 1b.
 
 The `=()` initialisers on the job arrays are required: bash 5.3 treats a bare
 `declare -gA` as unset under `set -u`. Why the knob is a workflow env value and not
@@ -244,7 +259,12 @@ for adding surface without a measured gain
    `RVB_MORPHE_PASSTHROUGH=true` (morphe merges natively, and some APKs misbehave
    after `apkeditor`'s rewrite + re-sign); otherwise `merge_splits` flattens them.
    `verify_downloaded_apk` then checks the payload really is the requested
-   package/version/arch before anything is patched. An **arch-honesty gate** follows:
+   package/version/arch before anything is patched. `_rekey_to_bytes` runs at that point
+   for every source: the name the artifact will carry is taken from its own `versionName`
+   and the patch gate re-checks that version, so a store that served a different flavour of
+   the requested number cannot leave a build labelled for a version it is not
+   ([decisions/0012](decisions/0012-direct-source-identity-comes-from-its-artifact.md),
+   widened to all sources). An **arch-honesty gate** follows:
    the artifact's real ABIs are read off its bytes (`_artifact_abis`) and, unless it
    carries the requested arch or is universal/arch-agnostic, the download is rejected
    and the run falls through to the next source — the arch goes unbuilt if no source
@@ -259,30 +279,77 @@ for adding surface without a measured gain
    APKPure/APKCombo/Uptodown links carry no ABI in the URL, so the first build to want
    one fetches it **once** and records its bytes in `temp/urlindex`; a later job that
    resolves the same link adopts the stored blob (right arch) or skips the source
-   (wrong arch) with no network hit. Universal bundles are cached under the shared
-   `-all` key and reused by both arch jobs from that single fetch.
-5. **Arch trimming** — one keep-list decides both halves (`_striplibs_keep_of_arch`).
-   Bundles go through `_trim_bundle_for_arch`, which drops whole foreign-ABI `config.*`
-   members; a plain APK goes through `_strip_apk_abis`, which reads the archive's own
-   entry list and deletes foreign `lib/<abi>/…` entries by exact name — never by a
-   wildcard, because `lib/x86/*` silently misses a `./`-rooted archive (rc 12, a warning
-   the old `|| :` threw away) while the `*lib/x86/*` that catches it also deletes an app's
-   `assets/engine/lib/x86/…` payload. Only Android's own ABI directory names are
-   candidates, so an app's `lib/<dir>` that names no ABI is left alone. The rewrite lands
-   through a temp file and one rename, and a failure ends that app's build rather than
-   publishing an unstripped artifact. Result is cached as
-   `<prefix>-<version>-<arch>.stripped.<ext>`. A morphe build then states the same
-   decision to the CLI as `--striplibs <keep-list>`, which filters at output assembly
-   rather than on the input: a no-op wherever the engine already removed those entries,
-   and otherwise the only thing that reaches a bundle's `base.apk` libs or a `lib/<dir>`
-   that names no ABI at all. `all` means **arm universal**: `arm64-v8a` and
+   (wrong arch) with no network hit. What a build finally stores is keyed the same way:
+   `_publish_stock_artifact` reads the arch token off the artifact — bundle or plain APK
+   alike — so a universal file takes the shared `-all` key that both arch jobs then reuse
+   from that single fetch, and an arch-specific file can never be adopted by somebody
+   else's build.
+5. **Arch trimming** — one keep-list (`_striplibs_keep_of_arch`) and **one decision about
+   who applies it** (`_patcher_strips_libs`). Bundles go through `_trim_bundle_for_arch`,
+   which drops whole foreign-ABI `config.*` members — a bundle member is never rewritten,
+   only removed, so the split APKs keep the signatures they were published with.
+   A plain APK is where the two halves differ: for a morphe build the flag
+   `--striplibs <keep-list>` filters the ABIs at output assembly and the input is staged
+   **unchanged** (a `cp` onto the same `<prefix>-<version>-<arch>.stripped.apk` path); for
+   every other patcher — and for `RVB_MORPHE_STRIPLIBS=false` — the engine rewrites it with
+   `_strip_apk_abis`, which reads the archive's own entry list and deletes foreign
+   `lib/<abi>/…` entries by exact name, adding an anchored wildcard only for `./`-rooted
+   entries so either Info-ZIP implementation can match them. `lib/x86/*` silently
+   misses a `./`-rooted archive (rc 12, a warning the old `|| :` threw away), while the broad
+   `*lib/x86/*` that catches it also deletes an app's `assets/engine/lib/x86/…` payload.
+   Only Android's own ABI directory names are candidates, so an app's `lib/<dir>` that names
+   no ABI is left alone. The rewrite lands through a temp file and one rename, and a failure
+   ends that app's build rather than publishing an unstripped artifact. Either way the
+   `<prefix>-<version>-<arch>.stripped.<ext>` path is also the reuse guard: a table build
+   that already staged that input for another mode does not stage it again.
+
+   **Why a morphe input must not be rewritten:** the APK Signing Block is not an entry — it
+   sits between the local file data and the central directory — so anything that rebuilds
+   the archive from the central directory drops it with the entries it deletes (`zip -d`
+   returning 0 was measured doing exactly that, leaving v2/v3 absent and v1 referencing
+   files that are gone). The patcher then holds an unsigned APK and every patch that reads
+   the **stock** certificate — the spoof-signature family, the universal microG metadata
+   patch — aborts with `NoCertificateException` after the archive has already been decoded
+   (the failure [j-hc/revanced-magisk-module#848](https://github.com/j-hc/revanced-magisk-module/issues/848)
+   reports for merged bundles). Nothing catches it earlier: `check_sig` only answers for a
+   package pinned in `sig.txt`. So the strip runs once, in the component that can do it
+   without destroying the archive; `all` means **arm universal**: `arm64-v8a` and
    `armeabi-v7a`, no x86 ABI, whichever artifact format the vendor shipped (an `all`
    bundle is otherwise copied whole, so the flag is what makes the two paths agree).
    Publishing x86/x86_64 would be its own decision, not a side effect of the download
-   source. `RVB_MORPHE_STRIPLIBS=false` drops the flag and patches from exactly the
-   inputs it did before.
+   source. `RVB_MORPHE_STRIPLIBS=false` drops the flag and hands the engine's rewritten
+   input back — the bisect switch, at the price of the certificate-reading patches above.
 6. **Patching** — `patch_apk` dispatches on the tool kind resolved by the patcher
-   registry (see below) and records which patches the tool reports as applied.
+   registry (see below) and records which patches the tool reports as applied. Morphe
+   answers with a machine-readable `-r` summary, and a summary that lists **nothing** applied
+   is a real signal rather than a parse miss (`_applied_from_result` echoes nothing when it
+   cannot read the file): the tool ran the whole pipeline over the stock APK, applied zero
+   patches and returned success. `build_rv` then refuses the artifact, deletes the patched
+   file so neither this build's module stage nor a later `NORB` reuse can adopt it, writes
+   `temp/failures/<slug>_npa.json` and returns 0 — the app is reported and settled, the rest
+   of the pool is untouched. A config that asked for nothing is exempt:
+   `exclusive-patches` with no `included-patches` names is a deliberate re-sign-and-rename
+   build, not a failure. Tools without a result file (revanced, xposed, instafel) are never
+   judged this way, because their scrape reports differently by design (run
+   41314721427: Proton Lumo shipped as an unpatched stock app under a patched name).
+   The requested-name check shares that carve-out for the same structural reason: it
+   compares the config's `included-patches` against the scraped names, and p-rel reports
+   display titles (`I: Patch 'Remove Ads' loaded`) while the config writes identifiers
+   (`remove_ads`) or whole-module aliases (`instafel`, which matches no title at all). The
+   two sides have no common namespace, so the check is skipped for the `instafel-workflow`
+   flow instead of approximated - folding underscores into spaces would also silence a
+   genuine miss in any other bundle that happened to title-case the same way.
+
+   **Morphe is handed an absolute input path.** morphe-desktop 2.x merges a bundle by first
+   staging the path it was given into its patching dir through a symlink, and a symlink target
+   resolves against the link's own directory rather than the process CWD: the relative
+   `temp/<prefix>-…-<arch>.stripped.<ext>` input became a dangling link, `ApkMerger` found a
+   path that is neither file nor directory, and the run aborted with `No such directory` (run
+   41830380958 lost all fifteen bundle builds that way while 1.20.0, which never staged, built
+   the identical cached artifact). A plain APK does not go through the merge step, so only the
+   passthrough broke. `-t` was already made absolute for the same reason and the input now
+   matches it; other patcher kinds keep the relative path, and the trace goldens pin that
+   difference.
 7. **Naming and metadata** — `aapt2`/`aapt` re-reads the patched manifest, so a
    patcher that rewrote the package id is recorded honestly; output is
    `<file-prefix>-v<version>-<arch>.apk`; `write_build_info` appends the record
@@ -319,7 +386,10 @@ for adding surface without a measured gain
 
 `DL_SRCS` in [utils.sh](../scripts/utils.sh) is the order every app is attempted
 in; the first source that yields a verified artifact **carrying the requested arch**
-(see the arch-honesty gate above) wins:
+(see the arch-honesty gate above) wins. It is also the order the watcher's version
+scrape asks in ([ci-pipelines.md](ci-pipelines.md)), minus `cache_repo`, `direct` and
+`archive` — reordering this array therefore changes which store gets to decide what a
+tracked app's "latest version" is, so it must stay the order the build prefers.
 
 | # | Source | Notes |
 |---|---|---|
@@ -329,7 +399,7 @@ in; the first source that yields a verified artifact **carrying the requested ar
 | 4 | `fdroid` | an F-Droid repo: a package page (versions from the site's `api/v1/packages/<pkg>` JSON, file named `<pkg>_<code>.apk`) or a bare repo root (versions, exact file names and declared ABIs read from `index-v1.jar`, falling back to `index.jar`). One APK per version code, so no variant picker; `pkg-name` is required for the repo-root form |
 | 5 | `archive` | `archive.org` item, the long-term fallback for delisted versions |
 | 6 | `apkmirror` | variant picker ranks the release's rows (see below); package/version read from the HTML |
-| 7 | `uptodown` | |
+| 7 | `uptodown` | versions and package name come from [uptodown.py](../scripts/uptodown.py) alone (its `/apps/<id>/versions/<page>` JSON); there is no shell fallback, because the one that used to follow the call parsed `__UPTODOWN_RESP__`, a variable nothing has set since the scrape moved into python. When the call answers nothing, `get_uptodown_vers` still returns 0 with empty output on purpose: `build_rv` calls it as `$(get_…_vers)` under `set -e`, where a non-zero would abort the app instead of letting the next source try |
 | 8 | `apkpure` | one link per ABI read off `/downloading/<v>` → `/download/<v>` → `/download`, the page's featured `#download_link` being only one candidate, with the store's own `?versionCode=&nc=` link form as the last resort when a page yields nothing; XAPK handling in `_apkpure_install_xapk` |
 | 9 | `apkcombo` | trusts the served filename over its object key |
 
@@ -343,15 +413,29 @@ Supporting machinery:
   `nativecode` list — measured over a 1400-app repo: 2964 released entries, no ABI-suffixed
   file names, and only two names deviating from the grammar (author quirks), which is why
   the index form never reconstructs a name ([decisions/0013](decisions/0013-an-fdroid-source-asks-the-repo-what-it-publishes.md)).
-- **A direct link's version belongs to the vendor** — the artifact is re-keyed to the
-  version and versionCode read off its bytes *before* the version-code and arch gates
-  judge it, and the patch-compatibility gate is then re-run on that version (the one
-  that ran before the download judged a version the link never served). A live build the
-  patch bundle does not support therefore drops the direct source, discards the fetch,
-  and leaves the version-selecting sources to serve the resolved version
-  ([decisions/0012](decisions/0012-direct-source-identity-comes-from-its-artifact.md));
-  a versionCode written by hand in `version-code` survives as an order and still
-  rejects the artifact.
+- **An artifact's version belongs to its bytes** — the staged file is re-keyed by
+  `_rekey_to_bytes` to the `versionName` read off its manifest *before* the version-code,
+  signature and arch gates finish judging it, and the patch-compatibility gate is then
+  re-run on that version (the one that ran before the download judged a version the source
+  never served). A build the patch bundle does not support therefore drops that source,
+  discards the fetch, records the version in the `_np` record's `bytesVersion`, and leaves
+  the remaining sources to serve the version the label asked for. This began as the direct
+  source's rule ([decisions/0012](decisions/0012-direct-source-identity-comes-from-its-artifact.md))
+  and now applies to every source, because the mismatch is a property of the file: a patch
+  bundle pins version *names*, and a store shipping two flavours of one number under one
+  versionCode cannot answer a suffixed request. Run 41314721427 is the case — Proton Lumo
+  was asked as `2.1.5-nogms`, APKMirror ships only `2.1.5-gms` (same code 79), and the
+  patcher applied zero patches to an artifact still named `-nogms`. Only `direct` re-keys
+  the versionCode as well, since a bare link claims no code while a store row has already
+  been checked against the target; a versionCode written by hand in `version-code` survives
+  as an order and still rejects the artifact.
+- **A cache hit is judged by the same name test** — `_cached_identity_disagrees` reads the
+  cached file's `versionName` before the loop adopts it (a cache hit skips every fetch
+  gate). A label the bytes deny is a false name, so the entry and its sidecars are deleted
+  and the source loop re-fetches; an unreadable `versionName` is *not* treated as a denial,
+  because aapt fails on some vendor bundles and reading that as a lie would re-download
+  every artifact on every run. A wrong `versionCode` alone stays the softer "not what this
+  target wants" case: the arch copy is dropped, the shared blob is left for a sibling.
 - **Anti-bot routing** — a Cloudflare-bypass sidecar (`CF_SOLVER_URL`, the
   `ghcr.io/sarperavci/cloudflarebypassforscraping` service in `build.yml`), asked
   about the **effective URL after redirects**, not the request URL; `curl_cffi`
@@ -377,6 +461,34 @@ Supporting machinery:
   `nc` and to serve nothing for an unknown `nc`). It is used only when the engine has
   already resolved a version code and the arch has a store spelling, it is logged as
   constructed, and the artifact is judged from its bytes like any other.
+- **Which release page a version resolves to** — before any row can be picked, `dl_apkmirror`
+  has to land on the page for that version, and an *old* version is not where the obvious
+  lookups expect it. Slug guessing uses the listing's current `<h1>` and the config's category
+  slug, so a release published under a **former app name** (`truecaller-trusted-caller-id-26-10-6`)
+  is missed; the app's own page lists ten recent releases and `/page/N/` re-renders them, so
+  anything older is invisible there. What remains is a search, and a search must be treated
+  as a *field of candidates*, never as a winner: `?s=<version>` is answered site-wide (APKMirror
+  ignores the app path once a query is present), so links are ordered by the app's own listing
+  path and then **each candidate page is fetched and read for its package until one belongs to
+  the app being built** — a wrong app or a dead link is named in the log and skipped, and a
+  rejected page is remembered so the ten-page walk cannot ask for it again. Taking the first
+  substring hit instead is what handed Truecaller-bufferk's 26.10.6 to `ru.vkusvill` (a grocer
+  that also sits on 26.10.6) and then abandoned APKMirror for the version, though the right link
+  was further down the same page (run 40175646917). The site-wide fallback is queried with the
+  app's **title**, not its listing slug: APKMirror matches display names and answers "No results
+  found matching your query" for `truecaller-caller-id-block 26.10.6`, while
+  `truecaller-spam-call-blocker 26.10.6` returns the release. A candidate budget
+  (`_APKMIRROR_CANDIDATE_LIMIT`) bounds the requests per field, because a store that throttles
+  datacenter IPs should not be walked six ways at once. A version carrying a **flavour**
+  (`2.1.5-nogms`, `1.7.0-lite`, `4.50.1_tv`) is ordered by that spelling first: the exact-slug
+  tier runs before the tier that accepts any suffix on the same number, so where the store ships
+  both flavours the requested one wins, and where it ships only the other one the loose tier
+  still answers (that is what keeps `1.7.0-lite` building when the slug is plain `1.7.0`) and
+  `_apkmirror_flavor_of` names the gap in the log before the transfer instead of after the
+  patcher has applied nothing. The flavour is never a veto, because the slug is the store's
+  spelling while the artifact's `versionName` is the fact, and `_rekey_to_bytes` judges that.
+  Pinned in by `.github/traces/test_apkmirror_release_lookup.sh` and
+  `.github/traces/test_apkmirror_flavor_ranking.sh`.
 - **APKMirror variant picking** — one release page lists several uploads of the *same*
   versionCode that differ only in their Architecture / Minimum Version / Screen DPI
   columns, so the row matcher (`scripts/apkmirror_search.py`, mirrored in `utils.sh` for
@@ -411,10 +523,19 @@ Supporting machinery:
   hard-wired at APKPure/APKCombo regardless of the chain.
 - **Transfer guards** — `_req` sets connect *and* absolute ceilings plus a low-
   speed stall guard, because a mirror that trickles would otherwise hold a build
-  slot forever.
-- **Locks** — per-package download locks under `temp/dllocks` stop parallel jobs
-  fetching the same APK twice; rejected downloads sweep their sibling bundle
-  files so the post-loop scan cannot adopt a partial artifact.
+  slot forever. `req_artifact` wraps it for a vendor's own download endpoint: a CDN
+  that closes the socket mid-file fails with curl (18), which `--retry` does not treat
+  as transient and which `-C -` cannot resume through a per-request signed redirect, so
+  the URL is re-requested (up to three attempts) rather than dropped as a source miss.
+- **Locks** — two of them, and neither may assert a fact the bytes have not proved yet.
+  `temp/dllocks` serialises a single destination path, so parallel jobs never fetch the
+  same file twice. `temp/apkslocks` serialises the whole cache-check → download → upload
+  sequence per **pkg + version**: deliberately not per version code, because the code is
+  read off the artifact after the lock is taken (an arch no supported version declares
+  starts without one, and `direct` re-keys afterwards), so codes-in-the-lock-name let two
+  sibling arch builds run unserialized and store one universal APK twice. Rejected
+  downloads sweep their sibling bundle files so the post-loop scan cannot adopt a
+  partial artifact.
 - **Response caches** — `__DL_RESP_CACHE__` and friends keep a run from
   re-scraping the same page per architecture.
 

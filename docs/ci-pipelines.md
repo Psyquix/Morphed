@@ -6,12 +6,12 @@ GitHub's limits; notify reports failures.
 
 | File | Name | Triggered by | Concurrency group |
 |---|---|---|---|
-| [ci.yml](../.github/workflows/ci.yml) | CI | `schedule` (6 UTC crons: ~4 h windows with randomized minutes), `workflow_dispatch` | `ci` |
+| [ci.yml](../.github/workflows/ci.yml) | CI | `schedule` (6 UTC crons: ~4 h windows with randomized minutes), `workflow_dispatch` (optional `remove_apks`, unset on every scheduled run) | `ci` |
 | [build.yml](../.github/workflows/build.yml) | Build | `workflow_call` only — from `ci.yml` (per pool) or `manual-ci.yml` | `build` |
 | [cleanup.yml](../.github/workflows/cleanup.yml) | Cleanup | `workflow_call`, `workflow_dispatch` | `clean` |
 | [manual-ci.yml](../.github/workflows/manual-ci.yml) | Manual CI | `workflow_dispatch` (config choice, optional `remove_apks`, `disable_dedup` checkbox) | `ci` |
 | [notify.yml](../.github/workflows/notify.yml) | Notify | `issues`/`pull_request` (debounced batch), `workflow_call` (immediate, when a needed job of the caller ended in `failure`) | drain: `notify-debounce` |
-| [trace-verify.yml](../.github/workflows/trace-verify.yml) | Trace Verify | `push` touching `scripts/build.sh`, `scripts/utils.sh`, `scripts/apkmirror_search.py`, `scripts/uptodown.py` or `.github/traces/**` | `trace-verify` |
+| [trace-verify.yml](../.github/workflows/trace-verify.yml) | Trace Verify | `push` touching `scripts/build.sh`, `scripts/utils.sh`, `scripts/apkmirror_search.py`, `scripts/uptodown.py`, the two version-watcher scripts or `.github/traces/**` | `trace-verify` |
 
 Nothing here runs on `push` to `main` except Trace Verify: a push changes
 behaviour for the *next* scheduled run, it does not start a build.
@@ -38,24 +38,32 @@ step's output is the next step's input:
 | Fetch configs & state | `fetch_data_branch.sh` | hard-fails if `data` is missing — no silent fallback to stale state |
 | Compile Base Configs | `compile_patch_configs.py` | every app's pool membership from `configs/patches/*.toml` |
 | Sync Patch Sources | `sync_patch_sources.py` | discovers all `(patches-source, host)` pairs, lists releases on GitHub/GitLab/Codeberg, rewrites `state/patch_sources.json`, prunes sources no config uses, emits `TRIGGER_STABLE`/`TRIGGER_BETA`/`TRIGGER_BLOCKED` and writes `changed_sources.json` |
-| Fetch App Versions | `ci_fetch_app_versions.sh` | scrapes current store versions (honours `"_check_only_listed"` in `state/app_versions.json`) |
-| Compare App Versions | `compare` step | `TRIGGER_APP_UPDATE` when a tracked app moved |
-| Detect config changes | `ci_detect_config_changes.sh` | always runs: diffs the compiled config against `state/built_shape.json` — its arch set **and** each app's tracked config map — enqueues new apps/arches (`reason: new`), apps whose tracked config moved (`reason: config`, with the field diff written to `changed_apps.json`) and carried-over retries into `state/pending_builds.json`, prunes queue entries whose app/arch left the config (the `built_shape` memory is kept, so re-enabling an app is not a new build request), **re-arms** an entry whose app config changed since it was written (`cfg` fingerprint: attempts reset, park lifted), and emits `TRIGGER_CONFIG_CHANGE` — which means "the watcher's state moved", not "build this": it is the only signal that gets `state/*.json` committed to `data`, and whether a run starts is decided downstream by the enabled-app count in the pool (why: [decisions/0010](decisions/0010-config-change-pending-builds.md), [0014](decisions/0014-config-changes-that-earn-a-rebuild.md)) |
+| Fetch App Versions | `ci_fetch_app_versions.sh` | scrapes current store versions (honours `"_check_only_listed"` in `state/app_versions.json`). Sources are asked in `DL_SRCS` order — the engine's own download order, read from `scripts/utils.sh` — so the version recorded is the one the build would be handed first; `cache_repo`, `direct` and `archive` are never asked for a listing (the cache and the mirror answer "do you have X?", not "what is the latest X?", and a direct URL's version only exists in its bytes). Every answer names the source it came from, and a source that loads but lists nothing is warned about by name before the search continues: a silent fall-through is what let one flaky Uptodown scrape hand a group to APKMirror, a release ahead, and record that as an update. Stays **soft** — no source answering at all writes `::error::` and moves on with the previous baseline, because one store rate-limiting the runner must not stall every other app's build |
+| Compare App Versions | `ci_compare` step | `TRIGGER_APP_UPDATE` when a tracked app moved **up**. Both sides are first reduced to their release key — everything before the first space, because stores print one release two ways (`349.9`, `349.9 - Stable`) — and the new key must beat the old under `get_highest_ver`, the engine's own comparator. A reformat of the same release and a lower version are each refused with a `::warning::` naming both values and leave `state/app_versions.json` byte-identical: re-recording either would re-key the build's cache name and re-patch an APK that never moved |
+| Detect config changes | `ci_detect_config_changes.sh` | always runs: diffs the compiled config against `state/built_shape.json` — its arch set **and** each app's tracked config map — enqueues new apps/arches (`reason: new`), apps whose tracked config moved (`reason: config`, with the field diff written to `changed_apps.json`) and carried-over retries into `state/pending_builds.json`, prunes queue entries whose app/arch left the config (the `built_shape` memory is kept, so re-enabling an app is not a new build request), **re-arms** an entry whose app config changed since it was written (`cfg` fingerprint: attempts reset, park lifted), names the reason for every woken app in the step log (the tracked-field diff, or `no tracked field differs from the last-built baseline; still owed: <arch>:<kind>` when the fields match but artifacts are missing - the shape that printed as a bare colon in run 41590950846; an app with an empty diff stays out of `changed_apps.json` and so out of the announcement), and emits `TRIGGER_CONFIG_CHANGE` — which means "the watcher's state moved", not "build this": it is the only signal that gets `state/*.json` committed to `data`, and whether a run starts is decided downstream by the enabled-app count in the pool (why: [decisions/0010](decisions/0010-config-change-pending-builds.md), [0014](decisions/0014-config-changes-that-earn-a-rebuild.md)) |
 | Classify triggers | `ci_trigger_flags.sh` | the two questions everyone else asks: `SOURCES_CHANGED`, `ANYTHING_CHANGED` (config change counts toward the latter, never the former) |
 | Check Patch App Updates | `ci_check_app_patches.py` | only when `SOURCES_CHANGED`: downloads the changed bundles and hashes them (`state/patch_file_hashes.json`) to find which apps the new patches actually cover |
 | Generate configs (JSON) | `ci_generate_configs.sh` | only when `ANYTHING_CHANGED`: writes the pool config each channel will build |
-| Resolve effective triggers | `ci_resolve_triggers.sh` | per-channel `TRIGGER_*` **after** generation, and downgrades a trigger to 0 when the resulting pool has no enabled apps |
+| Resolve effective triggers | `ci_resolve_triggers.sh` | per-channel `TRIGGER_*` **after** generation, and downgrades a trigger to 0 when the resulting pool has no enabled apps. A flag shared by both channels (`TRIGGER_APP_UPDATE`, `TRIGGER_CONFIG_CHANGE`) is a reason only for the channel whose own lists name an app of that pool - membership decides, not the flag |
 | Notify telegram | `ci_notify_telegram.sh` | raw vs effective triggers, so a suppressed trigger is visible; sent as Telegram **HTML** so the bundle heading can be bold *and* linked (legacy Markdown renders `*text [a](url)*` literally), the grammar the release notes already use; mirrored to `DISCORD_WEBHOOK_PATCH_ALERT` ([§Discord mirror](#discord-mirror-notify_discordsh)) |
 | Notify build queue | `ci_notify_queue.sh` | ONE message on the log topic (`TG_THREAD_NOTIFY`) naming every app this run will actually build: the enabled keys of the regenerated pools, as `📱 *Name* (brand • variant)` blocks grouped under `🧩 *owner/repo* ([tag](release page)) · N apps` headers — the same bold-heading grammar the release notes use (the tag is a version, not another path segment, and the parentheses sit outside the link because a `)` ends a `[label](url)` run in both dialects). It reads the **effective** triggers, not the raw ones, so a channel `ci_resolve_triggers.sh` downgraded for want of enabled apps contributes nothing (the watcher is also the last place both pools are visible together — each build job sees only its own config). The tag is the one the build would resolve: the app's own `patches-version`, else the pool's channel, answered from `state/patch_sources.json` the same way `_patch_source_state_tag` answers it. An app with nothing to build from is **not queued and not listed** — a source the snapshot marks `blocked` is skipped by the engine before it resolves any version, and a channel with no tag recorded for that source has no bundle to patch (a stable-only repository therefore contributes no beta line) — each skip is written to the step log so a missing app is explainable. A pool whose every app is filtered out sends nothing. Mirrored to `DISCORD_WEBHOOK_GITHUB_LOG` |
 | Notify announcements | `ci_notify_announcements.sh` | ONE message on the NullStore announcement topic (`TG_THREAD_ANNOUNCE`) covering both things the watcher can cause: apps added to the config (`new_apps.json`) and apps it woke because their tracked config moved (`changed_apps.json`, printed as the field diff, e.g. `build-mode: apk → both`). No-op when neither has anything; one send per run, not two notices chasing each other. Mirrored to `DISCORD_WEBHOOK_GITHUB_LOG` |
 | Commit updated state | `commit_data_branch.sh` | pushes **only** `*.json` under `configs/` + `state/` to `data` |
 
-Two design rules worth preserving:
+Some design rules worth preserving:
 
 - **`changed_sources.json` is written once**, by the sync step
   (`derive_source_changes.py`). Config generation, the patch-relevance scan and
   the trigger flags all project from that one record, so three steps can never
   disagree about what moved.
+- **A version is an update only when it goes up, and the watcher asks its stores in
+  the order the engine downloads in.** Both halves are one rule: the version recorded
+  in `state/app_versions.json` must be the answer the build would have got anyway, or a
+  scraping hiccup becomes a release. That record is not just bookkeeping — when a patch
+  bundle advertises no version, `build_rv` patches exactly what the watcher wrote, so a
+  bounce between two stores re-patched and re-released the same APKs on alternate ticks
+  (Discord: `349.9 - Stable` ↔ `350.8 - Stable`, twice in two days). `DL_SRCS` is the
+  order and `get_highest_ver` is the ordering; neither is reimplemented here.
 - **Generation is membership-only.** `ci_generate_configs.sh` sets
   `enabled = false` for apps outside this run's change set and never rewrites a
   version: an app whose `patches-version` is a channel keyword keeps the keyword,
@@ -72,9 +80,9 @@ Two design rules worth preserving:
 |---|---|---|
 | A patch source publishes a release on the stable channel | `TRIGGER_STABLE` | stable pool regenerates and builds |
 | …on the beta channel | `TRIGGER_BETA` | beta pool only |
-| An app's own version changed in a tracked store | `TRIGGER_APP_UPDATE` | both pools reconsider membership (beta gated as above) |
+| An app's own version moved **up** in a tracked store | `TRIGGER_APP_UPDATE` | both pools reconsider membership (beta gated as above); a pool **builds** only when `active_apps.json` holds a key it lists, since one store group can span both pools |
 | A source is blocked or unblocked (`404`/`451`/`403` from the forge) | `TRIGGER_BLOCKED` | regenerates membership, so frozen sources drop out and recovered ones return |
-| The config gained a new app or a new architecture, **or** a previously-failed build is still owed a retry, **or** an app's own config changed under a parked entry (re-arm) | `TRIGGER_CONFIG_CHANGE` (non-parked pending list) | pool regenerates with the pending apps force-enabled, and the build runs even though no source or version moved (why: [decisions/0010](decisions/0010-config-change-pending-builds.md)) |
+| The config gained a new app or a new architecture, **or** a previously-failed build is still owed a retry, **or** an app's own config changed under a parked entry (re-arm) | `TRIGGER_CONFIG_CHANGE` (non-parked pending list) | the pool whose channel owns those entries regenerates with the pending apps force-enabled and builds, even though no source or version moved - a stable edit wakes stable only, which is the half that was missing (run 41590950846: an arch field removed from one stable app re-patched both Google Keyboard variants, the content-hash gate called them "Unchanged build", and the queue notice named them anyway; why: [decisions/0010](decisions/0010-config-change-pending-builds.md)) |
 | Nothing moved | all `0` | no config write, no notification, no build |
 
 A blocked source is **skipped**, not retried: neither a retry nor a live listing
@@ -115,10 +123,11 @@ forge answers again. The deliberate fail-open inside that check is recorded in
 
 ## The build job (`build.yml`)
 
-Called once per pool with `config_file` (and optional `remove_apks`, plus
-`disable_dedup` from Manual CI). Everything it needs to be reproducible lives in
-that one file, including the tuning knobs —
-`PARALLEL_JOBS: "6"` and `UPLOAD_CONCURRENCY: "12"` are workflow env values, not
+Called once per pool with `config_file` (and optional `remove_apks`, which both CI
+and Manual CI can pass, plus `disable_dedup` from Manual CI). Everything it needs to
+be reproducible lives in
+that one file, including the tuning knobs - `PARALLEL_JOBS: "3"`,
+`UPLOAD_CONCURRENCY: "12"` and `RVB_JVM_MAX_HEAP: "3g"` are workflow env values, not
 repo variables, so they are visible in PRs, survive forks, and carry git history
 (why: [decisions/0005](decisions/0005-tuning-knobs-live-in-the-workflow.md)).
 
@@ -127,6 +136,32 @@ Step order, with the reason each is where it is:
 1. Java 21 (Temurin) → checkout `main` with `fetch-depth: 0` and submodules (full
    history is needed to enumerate existing tags and to commit to other branches) →
    `fetch_data_branch.sh`.
+1b. The pool-size knobs answer one failure: the build step dies with SIGTERM, logged
+   as `Process completed with exit code 143` plus "The runner has received a shutdown
+   signal", partway through a full pool. Runs 41533052163 and 41566179123 both lost the
+   job about 13 minutes in with 14 and 25 app/arch builds already reaped, and because
+   the runner agent itself was torn down every later step was skipped, so the run
+   published nothing, filed no failure report and committed no retry state. Each child
+   patches in its own JVM and no `java` call used to carry a heap flag, so a child was
+   allowed the JVM default of a quarter of RAM: six of them is a ~24 GiB ceiling on the
+   standard 4-core/16 GB public-repo runner, before the Cloudflare sidecar's browsers,
+   the apkeditor/apksigner JVMs and the page cache. The class is the hosted runner's own
+   resource limit and arrives with no diagnostic
+   ([actions/runner-images#6680](https://github.com/actions/runner-images/issues/6680));
+   larger runners would be the other answer and are not reachable from here, needing a
+   Team or Enterprise organization and per-minute billing even in public repositories.
+   `PARALLEL_JOBS: "3"` with `RVB_JVM_MAX_HEAP: "3g"` is a 9 GiB aggregate ceiling
+   against those 15 GiB, applied by the engine's `java()` wrapper
+   ([build-engine.md](build-engine.md)); neither knob alone leaves margin. Both TikTok
+   arches at 482k classes and GooglePhotos with its root modules patched fine under 3g
+   (run 41578120659), so the cap is not yet costing an app.
+
+   Two mitigations were tried and removed for being worthless. A swap-file step
+   (`enable_swap.sh`, commit 9c68a520) turned out to be inert: `ubuntu-latest` already
+   ships its own `/swapfile` of 3 GiB, so the step only ever printed a baseline. A
+   post-pool `swapon --show`/`free -h` step measured after the drain, which is residue,
+   not peak - a real peak needs sampling **during** the build step. If the 143 returns,
+   that sampler is the first thing to add, not more swap.
 2. `build_resolve_context.sh` maps the config file to `ARCHIVE_TAG`,
    `IS_PRERELEASE`, `TITLE_SUFFIX` and the Telegram thread — the single owner of
    "which channel is this run".
@@ -178,10 +213,15 @@ Step order, with the reason each is where it is:
    resolved and the build aborts before the plain descriptor exists; rendered in a Patch
    Bundle Unreadable section naming both the bundle and the CLI), apps the patch set
    **refused for every supported version** (`<slug>_np.json`: the tried versions and
-   the bundle link, and deliberately no APK search links, since nothing was ever
-   fetched), and apps whose **download sources were all exhausted**
-   (`<slug>_dl.json`, a request to upload the APK to the cache repo manually), plus a
-   link to the run. A slug that has a build record has its `_dl`/`_np`/`_pf`/`_lb` twins
+   the bundle link, and deliberately no APK search links, since uploading a file is not
+   what fixes it. Its optional `bytesVersion` names a version that was fetched and then
+   refused, rendered as "file is `vY`" so a wrong-flavour store answer reads differently
+   from a bundle that never covered the version), apps whose **download sources were all
+   exhausted** (`<slug>_dl.json`, a request to upload the APK to the cache repo manually),
+   and apps the patcher **completed while applying nothing** (`<slug>_npa.json`, rendered in
+   a CLI Issue section with the bundle release link: the artifact was refused, so the bundle
+   or the config is the thing to fix), plus a link to the run. A slug that has a build record
+   has its `_dl`/`_np`/`_pf`/`_lb`/`_npa` twins
    dropped, so an app is reported once. When it sends, it sets the job output
    `reported_failures=true`, which
    `trigger_notify_failure` forwards as `already_reported` so
@@ -192,8 +232,9 @@ Step order, with the reason each is where it is:
    `state/built_shape.json` + `state/pending_builds.json` for this channel. **Only
    download exhaustion (`_dl`) is retried**: a `_dl` arch still requested is re-queued
    as a retry and parked once it hits `RVB_RETRY_MAX`. Every other failure class — a
-   build abort (`<slug>.json`), a patcher abort (`_pf`), a patch-set rejection (`_np`)
-   and a bundle-unreadable abort (`_lb`) — is **settled, not retried**: re-running the
+   build abort (`<slug>.json`), a patcher abort (`_pf`), a patch-set rejection (`_np`),
+   a zero-patch build (`_npa`) and a bundle-unreadable abort (`_lb`) — is **settled, not
+   retried**: re-running the
    same engine over the same
    inputs reproduces the same abort, so it spends a build slot to learn nothing. The
    fix for those is a patch-bundle release or a config edit, and both already
@@ -326,11 +367,16 @@ the switch.
 
 - **`workflow_call` — immediate.** A caller (`ci.yml`/`manual-ci.yml`) invokes it on
   `failure()`; the `notify` job renders the generic "🔴 CI #N failed" alert via
-  `notify_send_telegram.sh` and posts it at once. When the caller passes
-  `already_reported=true` (Route B — the build's own Report-build-failures step
-  already sent a per-app report) the script exits without posting, so a build
-  failure is never double-messaged. Non-build failures (checkout, `check_patch`)
-  never set the flag and still alert.
+  `notify_send_telegram.sh` and posts it at once. Inside a called workflow the `github`
+  context is the **caller run's**, so `github.event_name` is `schedule` or
+  `workflow_dispatch` there, never `workflow_call` - the job gate is therefore
+  `!= 'issues' && != 'pull_request'` (the two events the jobs above answer to), and an
+  `== 'workflow_call'` form would match nothing: written that way, this alert skipped
+  all 28 CI and Manual CI runs checked, including the three that failed. When the caller
+  passes `already_reported=true` (Route B — the build's own Report-build-failures step
+  already sent a per-app report) the script exits without posting, so a build failure is
+  never double-messaged. Non-build failures (checkout, `check_patch`) never set the flag
+  and still alert.
 - **`issues` / `pull_request` — debounced batch.** GitHub fires one run per event and
   runs cannot share memory, so a burst (several issues closing at once) would
   otherwise post one message each. The `enqueue` job instead renders the event and
@@ -454,7 +500,7 @@ the runner's git config.
 | var | `TG_CHAT_ID`, `TG_CHAT_ID_BROADCAST`, `TG_THREAD_CI`, `TG_THREAD_STABLE`, `TG_THREAD_BETA`, `TG_THREAD_NOTIFY`, `TG_THREAD_ANNOUNCE` | notifications | the chat handle and every topic ID come from here only, and an unset one fails its notify step (see the target guard above) instead of falling back to a written-in chat; `TG_THREAD_NOTIFY` is the log topic and receives two separate kinds of message — the per-app build/download failure report, and the watcher's build-queue notice listing what the run resolved to build; `TG_THREAD_ANNOUNCE` is the announcement topic — config additions and config-change rebuild notices together (that step is `continue-on-error`, so an unset one only skips the notice). It replaced `TG_THREAD_NEWAPPS`, which pointed at the same topic under the narrower name |
 | var | `RELEASE_NOTES_DISCORD_LINK`, `RELEASE_NOTES_DONATE_LINK`, `RELEASE_NOTES_WEBSITE_LINK` | build, watcher | the footer links of the generated release body; `RELEASE_NOTES_WEBSITE_LINK` doubles as the announcement's download link (`WEBSITE_LINK`). No URL is written into the workflows or the scripts, so an unset var drops its entry — the announcement loses the whole download line — instead of inventing a target |
 | var | `RVB_MORPHE_PASSTHROUGH` | build | bundle handling escape hatch |
-| var | `RVB_MORPHE_STRIPLIBS` | build | bisect switch for morphe's own `--striplibs`, passed on top of the engine's trim/`zip -d`; `false` patches with the engine strip alone ([build-engine.md](build-engine.md)) |
+| var | `RVB_MORPHE_STRIPLIBS` | build | bisect switch for morphe's own `--striplibs`, which is then the **only** native-lib strip a plain-APK input gets — the engine stops rewriting that input, because deleting entries from it would delete its signing block ([build-engine.md](build-engine.md)); `false` restores the engine `zip -d` rewrite and drops the flag (bundle trims are unaffected) |
 
 ## Log conventions
 
