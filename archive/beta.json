@@ -4,7 +4,7 @@
   "meta": {
     "build": "beta",
     "channel": "beta",
-    "publishedAt": "2026-11-04T20:08:12Z"
+    "publishedAt": "2026-11-06T01:08:25Z"
   },
   "files": {
     "twitter-piko-v12.19.1-release.0-arm64-v8a.apk": {
@@ -420,10 +420,10 @@
       "subVariant": null,
       "packageName": "com.reddit.frontpage",
       "patchSources": [
-        "MorpheApp/patches-2.1.0-dev.8.mpp"
+        "MorpheApp/patches-2.1.0-dev.11.mpp"
       ],
       "changelogs": [
-        "https://github.com/MorpheApp/morphe-patches/releases/tag/v2.1.0-dev.8"
+        "https://github.com/MorpheApp/morphe-patches/releases/tag/v2.1.0-dev.11"
       ],
       "appliedPatches": [
         "App icon",
@@ -456,8 +456,8 @@
         "Spoof signature",
         "Start as guest"
       ],
-      "originBuild": "260218",
-      "publishedAt": "2026-11-04T06:14:32Z"
+      "originBuild": "260223",
+      "publishedAt": "2026-11-06T01:08:10Z"
     },
     "youtube-music-morphe-experimental-v9.43.51-arm64-v8a.apk": {
       "name": "youtube-music-morphe-experimental",
@@ -543,10 +543,10 @@
       "subVariant": null,
       "packageName": "com.reddit.frontpage",
       "patchSources": [
-        "MorpheApp/patches-2.1.0-dev.8.mpp"
+        "MorpheApp/patches-2.1.0-dev.11.mpp"
       ],
       "changelogs": [
-        "https://github.com/MorpheApp/morphe-patches/releases/tag/v2.1.0-dev.8"
+        "https://github.com/MorpheApp/morphe-patches/releases/tag/v2.1.0-dev.11"
       ],
       "appliedPatches": [
         "App icon",
@@ -579,8 +579,8 @@
         "Spoof signature",
         "Start as guest"
       ],
-      "originBuild": "260218",
-      "publishedAt": "2026-11-04T06:14:32Z"
+      "originBuild": "260223",
+      "publishedAt": "2026-11-06T01:08:10Z"
     },
     "youtube-morphe-v21.30.216-arm64-v8a.apk": {
       "name": "youtube-morphe",
