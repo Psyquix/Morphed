@@ -293,8 +293,9 @@ for adding surface without a measured gain
    **unchanged** (a `cp` onto the same `<prefix>-<version>-<arch>.stripped.apk` path); for
    every other patcher — and for `RVB_MORPHE_STRIPLIBS=false` — the engine rewrites it with
    `_strip_apk_abis`, which reads the archive's own entry list and deletes foreign
-   `lib/<abi>/…` entries by exact name — never by a wildcard, because `lib/x86/*` silently
-   misses a `./`-rooted archive (rc 12, a warning the old `|| :` threw away) while the
+   `lib/<abi>/…` entries by exact name, adding an anchored wildcard only for `./`-rooted
+   entries so either Info-ZIP implementation can match them. `lib/x86/*` silently
+   misses a `./`-rooted archive (rc 12, a warning the old `|| :` threw away), while the broad
    `*lib/x86/*` that catches it also deletes an app's `assets/engine/lib/x86/…` payload.
    Only Android's own ABI directory names are candidates, so an app's `lib/<dir>` that names
    no ABI is left alone. The rewrite lands through a temp file and one rename, and a failure

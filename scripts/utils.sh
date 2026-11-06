@@ -1920,11 +1920,11 @@ _patcher_strips_libs() {
 # rewrite and the patcher's strip state the same decision - and a build gets one of the two
 # behaviours, never both (_patcher_strips_libs picks).
 #
-# Deletion happens by exact entry name read off the archive, never by a wildcard: zip
-# matches the stored name, so "lib/x86/*" leaves a "./"-rooted "./lib/x86/libso.so"
-# untouched and reports only a warning the old `|| :` threw away, while the widening that
-# does catch it ("*lib/x86/*") also deletes an app's own "assets/engine/lib/x86/…"
-# payload. Both halves were measured, and both are pinned by
+# Deletion reads the archive's own entry list and anchors on each stored name: exact names
+# are passed for every entry, with an anchored wildcard added only for "./"-rooted entries
+# so either Info-ZIP implementation can match them. No broad wildcard is used because
+# "lib/x86/*" leaves dot-rooted entries untouched, while "*lib/x86/*" also deletes an app's
+# own "assets/engine/lib/x86/…" payload. Both sides are pinned by
 # .github/traces/test_arch_strip.sh. The candidate set is Android's own ABI directories -
 # an app's lib/<dir> that names no ABI is nobody's claim to delete.
 #
